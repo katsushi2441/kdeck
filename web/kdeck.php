@@ -88,7 +88,20 @@ if (isset($_GET['api']) && $_GET['api'] === 'chat_thread') {
 }
 
 $config = kdeck_api('GET', '/api/config');
-$roots = $config['allowed_roots'] ?? ['/home/kojima/work/url2ai'];
+$default_roots = [
+    '/home/kojima/work/url2ai',
+    '/home/kojima/work/vwork',
+    '/home/kojima/work/kmail',
+    '/home/kojima/work/rqdb4ai',
+    '/home/kojima/work/aixec',
+    '/home/kojima/work/horizon',
+    '/home/kojima/work/buzblogger',
+    '/home/kojima/work/swork',
+    '/home/kojima/work/kdeck',
+];
+$roots = !empty($config['allowed_roots']) && is_array($config['allowed_roots'])
+    ? $config['allowed_roots']
+    : $default_roots;
 $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 ?><!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kurage Agent Deck</title>
 <meta name="description" content="Kurage Agent Deck is a mobile web console for Codex CLI sessions.">
