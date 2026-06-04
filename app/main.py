@@ -154,6 +154,7 @@ class Session:
 SESSIONS: dict[str, Session] = {}
 TICKETS: dict[str, tuple[str, float]] = {}
 CHAT_THREADS: dict[str, list[dict[str, str]]] = {}
+CHAT_JOBS: dict[str, dict[str, Any]] = {}
 
 
 def require_auth(authorization: str = Header(default="")) -> None:
@@ -286,6 +287,39 @@ def chat(req: ChatRequest) -> dict[str, Any]:
     cwd = validate_cwd(req.cwd)
     model = req.model.strip() or CODEX_MODEL
     thread_id = req.thread_id.strip() or f"chat-{uuid.uuid4().hex[:8]}"
+    job_id = f"chatjob-{uuid.uuid4().hex[:10]}"
+    CHAT_JOBS[job_id] = {
+        "ok": True,
+        "job_id": job_id,
+        "thread_id": thread_id,
+        "status": "running",
+        "model": model,
+        "cwd": str(cwd),
+        "message": "",
+        "error": "",
+        "created": int(time.time()),
+        "finished": 0,
+    }
+
+    def worker() -> None:
+        try:
+            result = run_chat_turn(cwd, model, thread_id, req.prompt)
+            CHAT_JOBS[job_id].update(result)
+            CHAT_JOBS[job_id]["status"] = "finished"
+            CHAT_JOBS[job_id]["finished"] = int(time.time())
+        except Exception as exc:
+            CHAT_JOBS[job_id].update({
+                "ok": False,
+                "status": "failed",
+                "error": str(exc),
+                "finished": int(time.time()),
+            })
+
+    threading.Thread(target=worker, daemon=True).start()
+    return CHAT_JOBS[job_id]
+
+
+def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str) -> dict[str, Any]:
     history = CHAT_THREADS.setdefault(thread_id, [])
     transcript = "\n\n".join(
         f"{m['role'].upper()}:\n{m['content']}" for m in history[-12:]
@@ -295,9 +329,9 @@ def chat(req: ChatRequest) -> dict[str, Any]:
         "Continue the conversation below and act on the selected workspace when needed.\n\n"
         + (transcript + "\n\n" if transcript else "")
         + "USER:\n"
-        + req.prompt
+        + user_prompt
     )
-    history.append({"role": "user", "content": req.prompt})
+    history.append({"role": "user", "content": user_prompt})
     result = run_codex_exec(cwd, model, prompt)
     assistant_text = result["text"] or "(no response)"
     history.append({"role": "assistant", "content": assistant_text})
@@ -309,6 +343,14 @@ def chat(req: ChatRequest) -> dict[str, Any]:
         "message": assistant_text,
         "stderr_tail": result["stderr_tail"],
     }
+
+
+@app.get("/api/chat/{job_id}", dependencies=[Depends(require_auth)])
+def chat_job(job_id: str) -> dict[str, Any]:
+    job = CHAT_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="chat job not found")
+    return job
 
 
 @app.get("/api/sessions", dependencies=[Depends(require_auth)])

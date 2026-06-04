@@ -75,6 +75,12 @@ if (isset($_GET['api']) && $_GET['api'] === 'chat') {
     echo json_encode(kdeck_api('POST', '/api/chat', is_array($payload) ? $payload : []), JSON_UNESCAPED_UNICODE);
     exit;
 }
+if (isset($_GET['api']) && $_GET['api'] === 'chat_job') {
+    header('Content-Type: application/json; charset=UTF-8');
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
+    echo json_encode(kdeck_api('GET', '/api/chat/' . rawurlencode($id)), JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
 $message = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -157,8 +163,23 @@ document.getElementById('chat-form').addEventListener('submit', async ev => {
   });
   const data = await res.json();
   if(data.thread_id) chatThread = data.thread_id;
-  pending.textContent = data.message || JSON.stringify(data, null, 2);
-  chatlog.scrollTop = chatlog.scrollHeight;
+  if(!data.job_id){
+    pending.textContent = data.message || JSON.stringify(data, null, 2);
+    return;
+  }
+  async function pollChat(){
+    const jobRes = await fetch('?api=chat_job&id=' + encodeURIComponent(data.job_id), {cache:'no-store'});
+    const job = await jobRes.json();
+    if(job.status === 'running'){
+      pending.textContent = '実行中...';
+      setTimeout(pollChat, 1500);
+      return;
+    }
+    if(job.thread_id) chatThread = job.thread_id;
+    pending.textContent = job.message || job.error || JSON.stringify(job, null, 2);
+    chatlog.scrollTop = chatlog.scrollHeight;
+  }
+  pollChat();
 });
 async function connectTerminal(){
   if(!active) return;
