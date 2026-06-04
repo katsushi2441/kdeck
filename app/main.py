@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import pty
+import queue
 import re
 import secrets
 import select
@@ -15,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -55,6 +57,7 @@ class Session:
         self.process: subprocess.Popen[bytes] | None = None
         self.output: deque[str] = deque(maxlen=25000)
         self.lock = threading.Lock()
+        self.subscribers: list[queue.Queue[str]] = []
 
     @property
     def alive(self) -> bool:
@@ -91,11 +94,18 @@ class Session:
                 text = data.decode("utf-8", errors="replace")
                 with self.lock:
                     self.output.append(text)
+                    subscribers = list(self.subscribers)
+                for subscriber in subscribers:
+                    subscriber.put(text)
             except OSError:
                 break
         code = self.process.poll() if self.process else None
+        final = f"\n[process exited: {code}]\n"
         with self.lock:
-            self.output.append(f"\n[process exited: {code}]\n")
+            self.output.append(final)
+            subscribers = list(self.subscribers)
+        for subscriber in subscribers:
+            subscriber.put(final)
 
     def capture(self, max_chars: int = 120000) -> str:
         with self.lock:
@@ -110,6 +120,22 @@ class Session:
         payload = text + ("\n" if enter else "")
         os.write(self.master_fd, payload.encode("utf-8"))
 
+    def send_raw(self, text: str) -> None:
+        if self.master_fd is None or not self.alive:
+            return
+        os.write(self.master_fd, text.encode("utf-8"))
+
+    def subscribe(self) -> queue.Queue[str]:
+        subscriber: queue.Queue[str] = queue.Queue(maxsize=1000)
+        with self.lock:
+            self.subscribers.append(subscriber)
+        return subscriber
+
+    def unsubscribe(self, subscriber: queue.Queue[str]) -> None:
+        with self.lock:
+            if subscriber in self.subscribers:
+                self.subscribers.remove(subscriber)
+
     def interrupt(self) -> None:
         if self.process is None or not self.alive:
             raise HTTPException(status_code=409, detail="session is not running")
@@ -117,6 +143,7 @@ class Session:
 
 
 SESSIONS: dict[str, Session] = {}
+TICKETS: dict[str, tuple[str, float]] = {}
 
 
 def require_auth(authorization: str = Header(default="")) -> None:
@@ -172,6 +199,23 @@ def list_sessions() -> list[dict[str, Any]]:
     return items
 
 
+def create_ticket(session_id: str) -> str:
+    ticket = secrets.token_urlsafe(24)
+    TICKETS[ticket] = (session_id, time.time() + 60)
+    for key, (_, expires) in list(TICKETS.items()):
+        if expires < time.time():
+            TICKETS.pop(key, None)
+    return ticket
+
+
+def consume_ticket(ticket: str, session_id: str) -> bool:
+    stored = TICKETS.pop(ticket, None)
+    if stored is None:
+        return False
+    stored_session_id, expires = stored
+    return stored_session_id == session_id and expires >= time.time()
+
+
 @app.get("/healthz")
 def healthz() -> dict[str, Any]:
     return {"ok": True, "service": "kdeck", "name": APP_NAME, "port": int(os.environ.get("KDECK_PORT", "18301"))}
@@ -219,6 +263,14 @@ def interrupt(session_id: str) -> dict[str, Any]:
     return {"ok": True, "id": session.id}
 
 
+@app.post("/api/sessions/{session_id}/ticket", dependencies=[Depends(require_auth)])
+def ticket(session_id: str) -> dict[str, Any]:
+    session = get_session(session_id)
+    if not session.alive:
+        raise HTTPException(status_code=409, detail="session is not running")
+    return {"ok": True, "id": session.id, "ticket": create_ticket(session.id), "expires_in": 60}
+
+
 @app.post("/api/sessions/{session_id}/terminate", dependencies=[Depends(require_auth)])
 def terminate(session_id: str) -> dict[str, Any]:
     session = get_session(session_id)
@@ -230,3 +282,32 @@ def terminate(session_id: str) -> dict[str, Any]:
             os.killpg(session.process.pid, signal.SIGKILL)
     SESSIONS.pop(session_id, None)
     return {"ok": True, "id": session.id}
+
+
+@app.websocket("/api/sessions/{session_id}/terminal")
+async def terminal(websocket: WebSocket, session_id: str, ticket: str = "") -> None:
+    if not consume_ticket(ticket, session_id):
+        await websocket.close(code=1008)
+        return
+    session = get_session(session_id)
+    subscriber = session.subscribe()
+    await websocket.accept()
+    backlog = session.capture()
+    if backlog:
+        await websocket.send_text(backlog)
+
+    async def send_output() -> None:
+        while True:
+            text = await asyncio.to_thread(subscriber.get)
+            await websocket.send_text(text)
+
+    task = asyncio.create_task(send_output())
+    try:
+        while True:
+            data = await websocket.receive_text()
+            session.send_raw(data)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        task.cancel()
+        session.unsubscribe(subscriber)
