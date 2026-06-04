@@ -28,6 +28,7 @@ SESSION_PREFIX = "kdeck-"
 TOKEN = os.environ.get("KDECK_TOKEN", "")
 CODEX_CMD = os.environ.get("KDECK_CODEX_CMD", "codex")
 CODEX_MODEL = os.environ.get("KDECK_CODEX_MODEL", "gpt-5.4-mini")
+CODEX_SANDBOX = os.environ.get("KDECK_CODEX_SANDBOX", "workspace-write")
 ALLOWED_ROOTS = [
     Path(p).expanduser().resolve()
     for p in os.environ.get("KDECK_ALLOWED_ROOTS", "/home/kojima/work/url2ai").split(",")
@@ -247,7 +248,7 @@ def run_codex_exec(cwd: Path, model: str, prompt: str) -> dict[str, Any]:
         "--cd",
         str(cwd),
         "--sandbox",
-        "workspace-write",
+        CODEX_SANDBOX,
         "-",
     ]
     proc = subprocess.run(

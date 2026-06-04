@@ -39,6 +39,10 @@ pip install -r requirements.txt
 scripts/run_kdeck.sh
 ```
 
+`KDECK_CODEX_SANDBOX` controls the Codex CLI sandbox mode. Use `danger-full-access`
+only on a trusted, login-protected deployment when Codex needs network access for
+operations such as `git push`.
+
 ## API
 
 - `GET /healthz`
