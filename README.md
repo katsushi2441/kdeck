@@ -15,7 +15,7 @@ Initial target:
 ```text
 Smartphone browser
   -> kurage.exbridge.jp/kdeck.php
-  -> PHP server-side proxy with web login
+  -> PHP server-side proxy with Kurage common X login
   -> http://<linux-server>:18301
   -> FastAPI
   -> PTY sessions
@@ -51,6 +51,6 @@ scripts/run_kdeck.sh
 
 - Bind behind firewall/port-forwarding with HTTPS at the edge.
 - Use `KDECK_TOKEN` for all API calls.
-- Protect `kdeck.php` with `KDECK_WEB_PASSWORD`; it can control local shell sessions.
+- Protect `kdeck.php` with `kurage.exbridge.jp` common X login; it can control local shell sessions.
 - Allowed working directories are controlled by `KDECK_ALLOWED_ROOTS`.
 - Avoid sudo from mobile sessions.
