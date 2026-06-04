@@ -29,6 +29,8 @@ TOKEN = os.environ.get("KDECK_TOKEN", "")
 CODEX_CMD = os.environ.get("KDECK_CODEX_CMD", "codex")
 CODEX_MODEL = os.environ.get("KDECK_CODEX_MODEL", "gpt-5.4-mini")
 CODEX_SANDBOX = os.environ.get("KDECK_CODEX_SANDBOX", "workspace-write")
+DATA_DIR = Path(os.environ.get("KDECK_DATA_DIR", Path(__file__).resolve().parents[1] / "storage")).expanduser()
+CHAT_DIR = DATA_DIR / "chat_threads"
 ALLOWED_ROOTS = [
     Path(p).expanduser().resolve()
     for p in os.environ.get("KDECK_ALLOWED_ROOTS", "/home/kojima/work/url2ai").split(",")
@@ -155,6 +157,7 @@ class Session:
 SESSIONS: dict[str, Session] = {}
 TICKETS: dict[str, tuple[str, float]] = {}
 CHAT_THREADS: dict[str, list[dict[str, str]]] = {}
+CHAT_META: dict[str, dict[str, Any]] = {}
 CHAT_JOBS: dict[str, dict[str, Any]] = {}
 
 
@@ -175,6 +178,102 @@ def safe_name(name: str) -> str:
 
 def session_id_for(name: str) -> str:
     return f"{SESSION_PREFIX}{safe_name(name)}-{uuid.uuid4().hex[:8]}"
+
+
+def safe_thread_id(thread_id: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "", thread_id.strip())
+    if not cleaned.startswith("chat-"):
+        return ""
+    return cleaned[:80]
+
+
+def thread_path(thread_id: str) -> Path:
+    return CHAT_DIR / f"{thread_id}.json"
+
+
+def thread_title(messages: list[dict[str, str]]) -> str:
+    for message in messages:
+        if message.get("role") == "user":
+            title = re.sub(r"\s+", " ", message.get("content", "")).strip()
+            return title[:52] + ("..." if len(title) > 52 else "")
+    return "New chat"
+
+
+def load_thread(thread_id: str) -> list[dict[str, str]]:
+    thread_id = safe_thread_id(thread_id)
+    if not thread_id:
+        return []
+    if thread_id in CHAT_THREADS:
+        return CHAT_THREADS[thread_id]
+    path = thread_path(thread_id)
+    if not path.exists():
+        CHAT_THREADS[thread_id] = []
+        return CHAT_THREADS[thread_id]
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        messages = payload.get("messages", [])
+        if not isinstance(messages, list):
+            messages = []
+        clean_messages = [
+            {"role": str(m.get("role", "")), "content": str(m.get("content", ""))}
+            for m in messages
+            if isinstance(m, dict) and m.get("role") in {"user", "assistant"}
+        ]
+        CHAT_THREADS[thread_id] = clean_messages
+        CHAT_META[thread_id] = {
+            "id": thread_id,
+            "title": str(payload.get("title") or thread_title(clean_messages)),
+            "cwd": str(payload.get("cwd") or ""),
+            "model": str(payload.get("model") or ""),
+            "created": int(payload.get("created") or 0),
+            "updated": int(payload.get("updated") or 0),
+        }
+    except Exception:
+        CHAT_THREADS[thread_id] = []
+    return CHAT_THREADS[thread_id]
+
+
+def save_thread(thread_id: str, cwd: str, model: str) -> None:
+    thread_id = safe_thread_id(thread_id)
+    if not thread_id:
+        return
+    CHAT_DIR.mkdir(parents=True, exist_ok=True)
+    messages = CHAT_THREADS.get(thread_id, [])
+    now = int(time.time())
+    meta = CHAT_META.get(thread_id, {})
+    created = int(meta.get("created") or now)
+    payload = {
+        "id": thread_id,
+        "title": thread_title(messages),
+        "cwd": cwd,
+        "model": model,
+        "created": created,
+        "updated": now,
+        "messages": messages[-80:],
+    }
+    thread_path(thread_id).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    CHAT_META[thread_id] = {k: payload[k] for k in ("id", "title", "cwd", "model", "created", "updated")}
+
+
+def list_chat_threads() -> list[dict[str, Any]]:
+    CHAT_DIR.mkdir(parents=True, exist_ok=True)
+    items: list[dict[str, Any]] = []
+    for path in CHAT_DIR.glob("chat-*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+            items.append({
+                "id": str(payload.get("id") or path.stem),
+                "title": str(payload.get("title") or thread_title(messages)),
+                "cwd": str(payload.get("cwd") or ""),
+                "model": str(payload.get("model") or ""),
+                "created": int(payload.get("created") or 0),
+                "updated": int(payload.get("updated") or 0),
+                "messages": len(messages),
+            })
+        except Exception:
+            continue
+    return sorted(items, key=lambda item: item.get("updated") or item.get("created") or 0, reverse=True)[:100]
 
 
 def validate_cwd(cwd: str) -> Path:
@@ -287,7 +386,7 @@ def run_codex_exec(cwd: Path, model: str, prompt: str) -> dict[str, Any]:
 def chat(req: ChatRequest) -> dict[str, Any]:
     cwd = validate_cwd(req.cwd)
     model = req.model.strip() or CODEX_MODEL
-    thread_id = req.thread_id.strip() or f"chat-{uuid.uuid4().hex[:8]}"
+    thread_id = safe_thread_id(req.thread_id) or f"chat-{uuid.uuid4().hex[:8]}"
     job_id = f"chatjob-{uuid.uuid4().hex[:10]}"
     CHAT_JOBS[job_id] = {
         "ok": True,
@@ -321,7 +420,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
 
 
 def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str) -> dict[str, Any]:
-    history = CHAT_THREADS.setdefault(thread_id, [])
+    history = load_thread(thread_id)
     transcript = "\n\n".join(
         f"{m['role'].upper()}:\n{m['content']}" for m in history[-12:]
     )
@@ -333,9 +432,11 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str) -> di
         + user_prompt
     )
     history.append({"role": "user", "content": user_prompt})
+    save_thread(thread_id, str(cwd), model)
     result = run_codex_exec(cwd, model, prompt)
     assistant_text = result["text"] or "(no response)"
     history.append({"role": "assistant", "content": assistant_text})
+    save_thread(thread_id, str(cwd), model)
     return {
         "ok": result["returncode"] == 0,
         "thread_id": thread_id,
@@ -352,6 +453,32 @@ def chat_job(job_id: str) -> dict[str, Any]:
     if job is None:
         raise HTTPException(status_code=404, detail="chat job not found")
     return job
+
+
+@app.get("/api/chat_threads", dependencies=[Depends(require_auth)])
+def chat_threads() -> dict[str, Any]:
+    return {"ok": True, "threads": list_chat_threads()}
+
+
+@app.get("/api/chat_threads/{thread_id}", dependencies=[Depends(require_auth)])
+def chat_thread(thread_id: str) -> dict[str, Any]:
+    thread_id = safe_thread_id(thread_id)
+    if not thread_id:
+        raise HTTPException(status_code=404, detail="chat thread not found")
+    messages = load_thread(thread_id)
+    meta = CHAT_META.get(thread_id, {})
+    return {
+        "ok": True,
+        "thread": {
+            "id": thread_id,
+            "title": meta.get("title") or thread_title(messages),
+            "cwd": meta.get("cwd") or "",
+            "model": meta.get("model") or "",
+            "created": meta.get("created") or 0,
+            "updated": meta.get("updated") or 0,
+            "messages": messages,
+        },
+    }
 
 
 @app.get("/api/sessions", dependencies=[Depends(require_auth)])
