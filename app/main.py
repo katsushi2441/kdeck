@@ -4,6 +4,7 @@ import asyncio
 import os
 import pty
 import queue
+import json
 import re
 import secrets
 import select
@@ -26,6 +27,7 @@ APP_NAME = "Kurage Agent Deck"
 SESSION_PREFIX = "kdeck-"
 TOKEN = os.environ.get("KDECK_TOKEN", "")
 CODEX_CMD = os.environ.get("KDECK_CODEX_CMD", "codex")
+CODEX_MODEL = os.environ.get("KDECK_CODEX_MODEL", "gpt-5.4-mini")
 ALLOWED_ROOTS = [
     Path(p).expanduser().resolve()
     for p in os.environ.get("KDECK_ALLOWED_ROOTS", "/home/kojima/work/url2ai").split(",")
@@ -44,6 +46,13 @@ class CreateSessionRequest(BaseModel):
 class SendRequest(BaseModel):
     text: str = Field(min_length=1, max_length=12000)
     enter: bool = True
+
+
+class ChatRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=12000)
+    cwd: str = "/home/kojima/work/url2ai"
+    thread_id: str = ""
+    model: str = ""
 
 
 class Session:
@@ -144,6 +153,7 @@ class Session:
 
 SESSIONS: dict[str, Session] = {}
 TICKETS: dict[str, tuple[str, float]] = {}
+CHAT_THREADS: dict[str, list[dict[str, str]]] = {}
 
 
 def require_auth(authorization: str = Header(default="")) -> None:
@@ -223,7 +233,82 @@ def healthz() -> dict[str, Any]:
 
 @app.get("/api/config", dependencies=[Depends(require_auth)])
 def config() -> dict[str, Any]:
-    return {"ok": True, "allowed_roots": [str(p) for p in ALLOWED_ROOTS], "codex_cmd": CODEX_CMD, "backend": "pty"}
+    return {"ok": True, "allowed_roots": [str(p) for p in ALLOWED_ROOTS], "codex_cmd": CODEX_CMD, "codex_model": CODEX_MODEL, "backend": "pty"}
+
+
+def run_codex_exec(cwd: Path, model: str, prompt: str) -> dict[str, Any]:
+    cmd = [
+        CODEX_CMD,
+        "exec",
+        "--json",
+        "-m",
+        model,
+        "--cd",
+        str(cwd),
+        "--sandbox",
+        "workspace-write",
+        "-",
+    ]
+    proc = subprocess.run(
+        cmd,
+        input=prompt,
+        text=True,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=900,
+    )
+    final_text = ""
+    events: list[dict[str, Any]] = []
+    for line in proc.stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        events.append(event)
+        item = event.get("item")
+        if event.get("type") == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message":
+            final_text = str(item.get("text", ""))
+        if event.get("type") == "turn.failed" and not final_text:
+            final_text = str(event.get("error", {}).get("message", "Codex turn failed"))
+    if proc.returncode != 0 and not final_text:
+        final_text = (proc.stderr or proc.stdout or f"codex exited with {proc.returncode}").strip()
+    return {
+        "returncode": proc.returncode,
+        "text": final_text,
+        "stderr_tail": proc.stderr[-4000:],
+        "events": events[-20:],
+    }
+
+
+@app.post("/api/chat", dependencies=[Depends(require_auth)])
+def chat(req: ChatRequest) -> dict[str, Any]:
+    cwd = validate_cwd(req.cwd)
+    model = req.model.strip() or CODEX_MODEL
+    thread_id = req.thread_id.strip() or f"chat-{uuid.uuid4().hex[:8]}"
+    history = CHAT_THREADS.setdefault(thread_id, [])
+    transcript = "\n\n".join(
+        f"{m['role'].upper()}:\n{m['content']}" for m in history[-12:]
+    )
+    prompt = (
+        "You are Codex in Kurage Agent Deck. Answer in Japanese unless the user asks otherwise.\n"
+        "Continue the conversation below and act on the selected workspace when needed.\n\n"
+        + (transcript + "\n\n" if transcript else "")
+        + "USER:\n"
+        + req.prompt
+    )
+    history.append({"role": "user", "content": req.prompt})
+    result = run_codex_exec(cwd, model, prompt)
+    assistant_text = result["text"] or "(no response)"
+    history.append({"role": "assistant", "content": assistant_text})
+    return {
+        "ok": result["returncode"] == 0,
+        "thread_id": thread_id,
+        "model": model,
+        "cwd": str(cwd),
+        "message": assistant_text,
+        "stderr_tail": result["stderr_tail"],
+    }
 
 
 @app.get("/api/sessions", dependencies=[Depends(require_auth)])
