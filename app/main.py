@@ -155,6 +155,9 @@ def get_session(session_id: str) -> Session:
 
 
 def list_sessions() -> list[dict[str, Any]]:
+    for session_id, session in list(SESSIONS.items()):
+        if not session.alive:
+            SESSIONS.pop(session_id, None)
     items = []
     for s in sorted(SESSIONS.values(), key=lambda item: item.created, reverse=True):
         items.append({
@@ -225,4 +228,5 @@ def terminate(session_id: str) -> dict[str, Any]:
             session.process.wait(timeout=3)
         except subprocess.TimeoutExpired:
             os.killpg(session.process.pid, signal.SIGKILL)
+    SESSIONS.pop(session_id, None)
     return {"ok": True, "id": session.id}
