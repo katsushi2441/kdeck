@@ -214,3 +214,15 @@ def interrupt(session_id: str) -> dict[str, Any]:
     session = get_session(session_id)
     session.interrupt()
     return {"ok": True, "id": session.id}
+
+
+@app.post("/api/sessions/{session_id}/terminate", dependencies=[Depends(require_auth)])
+def terminate(session_id: str) -> dict[str, Any]:
+    session = get_session(session_id)
+    if session.process is not None and session.alive:
+        os.killpg(session.process.pid, signal.SIGTERM)
+        try:
+            session.process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            os.killpg(session.process.pid, signal.SIGKILL)
+    return {"ok": True, "id": session.id}

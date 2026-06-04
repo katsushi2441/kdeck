@@ -48,6 +48,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['id'] ?? '');
         $res = kdeck_api('POST', '/api/sessions/' . rawurlencode($id) . '/interrupt');
         $message = !empty($res['ok']) ? 'interrupt sent' : 'error: ' . json_encode($res, JSON_UNESCAPED_UNICODE);
+    } elseif ($action === 'terminate') {
+        $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['id'] ?? '');
+        $res = kdeck_api('POST', '/api/sessions/' . rawurlencode($id) . '/terminate');
+        $message = !empty($res['ok']) ? 'terminated' : 'error: ' . json_encode($res, JSON_UNESCAPED_UNICODE);
     }
 }
 $sessions = kdeck_api('GET', '/api/sessions');
@@ -63,7 +67,7 @@ body{margin:0;background:#f4f7f9;color:#18252d;font-family:-apple-system,BlinkMa
 <?php foreach (($sessions['sessions'] ?? []) as $s): ?><a class="session <?=($active===$s['id']?'active':'')?>" href="?id=<?=h($s['id'])?>"><b><?=h($s['name'])?></b><div class="muted"><?=h($s['id'])?></div></a><?php endforeach; ?>
 <h2>New</h2><form method="post"><input type="hidden" name="action" value="create"><div class="row"><input name="name" value="codex" placeholder="session name"></div><div class="row"><select name="cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div><div class="row"><input name="command" value="codex" placeholder="command"></div><button type="submit">Start</button></form></aside>
 <main class="panel"><h2><?=h($active ?: 'No session')?></h2><div id="console" class="console">loading...</div>
-<?php if ($active): ?><form class="sendbox" method="post"><input type="hidden" name="action" value="send"><input type="hidden" name="id" value="<?=h($active)?>"><textarea name="text" rows="3" placeholder="Codexへ送る指示"></textarea><button type="submit">Send</button><button class="danger" type="submit" name="action" value="interrupt">Ctrl+C</button></form><?php endif; ?></main></div>
+<?php if ($active): ?><form class="sendbox" method="post"><input type="hidden" name="action" value="send"><input type="hidden" name="id" value="<?=h($active)?>"><textarea name="text" rows="3" placeholder="Codexへ送る指示"></textarea><button type="submit">Send</button><button class="danger" type="submit" name="action" value="interrupt">Ctrl+C</button><button class="danger" type="submit" name="action" value="terminate">Stop</button></form><?php endif; ?></main></div>
 <script>
 const active = <?=json_encode($active)?>;
 async function refresh(){
