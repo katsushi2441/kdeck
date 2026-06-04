@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import os
+import pty
 import re
 import secrets
+import select
+import signal
 import subprocess
+import threading
 import time
+import uuid
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +44,81 @@ class SendRequest(BaseModel):
     enter: bool = True
 
 
+class Session:
+    def __init__(self, session_id: str, name: str, cwd: Path, command: str):
+        self.id = session_id
+        self.name = name
+        self.cwd = cwd
+        self.command = command
+        self.created = int(time.time())
+        self.master_fd: int | None = None
+        self.process: subprocess.Popen[bytes] | None = None
+        self.output: deque[str] = deque(maxlen=25000)
+        self.lock = threading.Lock()
+
+    @property
+    def alive(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def start(self) -> None:
+        master_fd, slave_fd = pty.openpty()
+        self.master_fd = master_fd
+        self.process = subprocess.Popen(
+            self.command,
+            cwd=str(self.cwd),
+            shell=True,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            start_new_session=True,
+        )
+        os.close(slave_fd)
+        thread = threading.Thread(target=self._reader, daemon=True)
+        thread.start()
+
+    def _reader(self) -> None:
+        assert self.master_fd is not None
+        while True:
+            if self.process is not None and self.process.poll() is not None:
+                break
+            try:
+                ready, _, _ = select.select([self.master_fd], [], [], 0.5)
+                if not ready:
+                    continue
+                data = os.read(self.master_fd, 8192)
+                if not data:
+                    break
+                text = data.decode("utf-8", errors="replace")
+                with self.lock:
+                    self.output.append(text)
+            except OSError:
+                break
+        code = self.process.poll() if self.process else None
+        with self.lock:
+            self.output.append(f"\n[process exited: {code}]\n")
+
+    def capture(self, max_chars: int = 120000) -> str:
+        with self.lock:
+            text = "".join(self.output)
+        if len(text) > max_chars:
+            text = text[-max_chars:]
+        return text
+
+    def send(self, text: str, enter: bool = True) -> None:
+        if self.master_fd is None or not self.alive:
+            raise HTTPException(status_code=409, detail="session is not running")
+        payload = text + ("\n" if enter else "")
+        os.write(self.master_fd, payload.encode("utf-8"))
+
+    def interrupt(self) -> None:
+        if self.process is None or not self.alive:
+            raise HTTPException(status_code=409, detail="session is not running")
+        os.killpg(self.process.pid, signal.SIGINT)
+
+
+SESSIONS: dict[str, Session] = {}
+
+
 def require_auth(authorization: str = Header(default="")) -> None:
     if not TOKEN or TOKEN == "change-this-token":
         raise HTTPException(status_code=500, detail="KDECK_TOKEN is not configured")
@@ -48,21 +129,13 @@ def require_auth(authorization: str = Header(default="")) -> None:
         raise HTTPException(status_code=403, detail="invalid token")
 
 
-def run_tmux(args: list[str], *, input_text: str | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["tmux"] + args,
-        input=input_text,
-        capture_output=True,
-        text=True,
-        check=check,
-    )
-
-
 def safe_name(name: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", name.strip().lower()).strip("-")
-    if not cleaned:
-        cleaned = "codex"
-    return (SESSION_PREFIX + cleaned)[:60]
+    return cleaned or "codex"
+
+
+def session_id_for(name: str) -> str:
+    return f"{SESSION_PREFIX}{safe_name(name)}-{uuid.uuid4().hex[:8]}"
 
 
 def validate_cwd(cwd: str) -> Path:
@@ -75,28 +148,25 @@ def validate_cwd(cwd: str) -> Path:
     raise HTTPException(status_code=400, detail="cwd is not allowed")
 
 
-def tmux_exists(session_id: str) -> bool:
-    res = run_tmux(["has-session", "-t", session_id], check=False)
-    return res.returncode == 0
+def get_session(session_id: str) -> Session:
+    if not session_id.startswith(SESSION_PREFIX) or session_id not in SESSIONS:
+        raise HTTPException(status_code=404, detail="session not found")
+    return SESSIONS[session_id]
 
 
 def list_sessions() -> list[dict[str, Any]]:
-    res = run_tmux(["list-sessions", "-F", "#{session_name}\t#{session_created}\t#{session_attached}"], check=False)
-    if res.returncode != 0:
-        return []
-    sessions = []
-    for line in res.stdout.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 3 or not parts[0].startswith(SESSION_PREFIX):
-            continue
-        session_id = parts[0]
-        sessions.append({
-            "id": session_id,
-            "name": session_id.removeprefix(SESSION_PREFIX),
-            "created": int(parts[1] or 0),
-            "attached": int(parts[2] or 0),
+    items = []
+    for s in sorted(SESSIONS.values(), key=lambda item: item.created, reverse=True):
+        items.append({
+            "id": s.id,
+            "name": s.name,
+            "cwd": str(s.cwd),
+            "command": s.command,
+            "created": s.created,
+            "alive": s.alive,
+            "attached": 0,
         })
-    return sessions
+    return items
 
 
 @app.get("/healthz")
@@ -106,7 +176,7 @@ def healthz() -> dict[str, Any]:
 
 @app.get("/api/config", dependencies=[Depends(require_auth)])
 def config() -> dict[str, Any]:
-    return {"ok": True, "allowed_roots": [str(p) for p in ALLOWED_ROOTS], "codex_cmd": CODEX_CMD}
+    return {"ok": True, "allowed_roots": [str(p) for p in ALLOWED_ROOTS], "codex_cmd": CODEX_CMD, "backend": "pty"}
 
 
 @app.get("/api/sessions", dependencies=[Depends(require_auth)])
@@ -117,39 +187,30 @@ def sessions() -> dict[str, Any]:
 @app.post("/api/sessions", dependencies=[Depends(require_auth)])
 def create_session(req: CreateSessionRequest) -> dict[str, Any]:
     cwd = validate_cwd(req.cwd)
-    session_id = safe_name(req.name)
-    if tmux_exists(session_id):
-        raise HTTPException(status_code=409, detail="session already exists")
+    name = safe_name(req.name)
     command = req.command.strip() or CODEX_CMD
-    run_tmux(["new-session", "-d", "-s", session_id, "-c", str(cwd), command])
+    session = Session(session_id_for(name), name, cwd, command)
+    session.start()
+    SESSIONS[session.id] = session
     time.sleep(0.2)
-    return {"ok": True, "id": session_id, "cwd": str(cwd), "command": command}
+    return {"ok": True, "id": session.id, "cwd": str(cwd), "command": command}
 
 
 @app.get("/api/sessions/{session_id}/capture", dependencies=[Depends(require_auth)])
 def capture(session_id: str, lines: int = 800) -> dict[str, Any]:
-    if not session_id.startswith(SESSION_PREFIX) or not tmux_exists(session_id):
-        raise HTTPException(status_code=404, detail="session not found")
-    lines = max(50, min(5000, int(lines)))
-    res = run_tmux(["capture-pane", "-t", session_id, "-p", "-S", f"-{lines}"], check=False)
-    return {"ok": res.returncode == 0, "id": session_id, "text": res.stdout, "error": res.stderr}
+    session = get_session(session_id)
+    return {"ok": True, "id": session.id, "alive": session.alive, "text": session.capture()}
 
 
 @app.post("/api/sessions/{session_id}/send", dependencies=[Depends(require_auth)])
 def send(session_id: str, req: SendRequest) -> dict[str, Any]:
-    if not session_id.startswith(SESSION_PREFIX) or not tmux_exists(session_id):
-        raise HTTPException(status_code=404, detail="session not found")
-    buffer_name = f"{session_id}-input"
-    run_tmux(["set-buffer", "-b", buffer_name, req.text])
-    run_tmux(["paste-buffer", "-d", "-b", buffer_name, "-t", session_id])
-    if req.enter:
-        run_tmux(["send-keys", "-t", session_id, "Enter"])
-    return {"ok": True, "id": session_id}
+    session = get_session(session_id)
+    session.send(req.text, req.enter)
+    return {"ok": True, "id": session.id}
 
 
 @app.post("/api/sessions/{session_id}/interrupt", dependencies=[Depends(require_auth)])
 def interrupt(session_id: str) -> dict[str, Any]:
-    if not session_id.startswith(SESSION_PREFIX) or not tmux_exists(session_id):
-        raise HTTPException(status_code=404, detail="session not found")
-    run_tmux(["send-keys", "-t", session_id, "C-c"])
-    return {"ok": True, "id": session_id}
+    session = get_session(session_id)
+    session.interrupt()
+    return {"ok": True, "id": session.id}
