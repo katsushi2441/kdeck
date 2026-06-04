@@ -25,6 +25,8 @@ Smartphone browser
 The PHP page keeps the API token on the web server side. The browser talks to PHP, not directly to FastAPI.
 The MVP stores sessions in API process memory, so active sessions disappear when `kdeck-api` restarts.
 
+See [Kurage Agent Deck の技術解説](docs/kurage-agent-deck-technical-overview.md) for a Japanese technical overview.
+
 ## Setup
 
 Create `.env` from `.env.sample` and set a strong token.
