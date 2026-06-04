@@ -8,21 +8,22 @@ Initial target:
 - Folder: `kdeck`
 - API: FastAPI on port `18301`
 - Web: `https://kurage.exbridge.jp/kdeck.php`
-- Runtime: tmux + Codex CLI
+- Runtime: built-in Python PTY sessions + Codex CLI
 
 ## Architecture
 
 ```text
 Smartphone browser
   -> kurage.exbridge.jp/kdeck.php
-  -> PHP server-side proxy
+  -> PHP server-side proxy with web login
   -> http://<linux-server>:18301
   -> FastAPI
-  -> tmux sessions
+  -> PTY sessions
   -> codex CLI
 ```
 
 The PHP page keeps the API token on the web server side. The browser talks to PHP, not directly to FastAPI.
+The MVP stores sessions in API process memory, so active sessions disappear when `kdeck-api` restarts.
 
 ## Setup
 
@@ -44,10 +45,12 @@ scripts/run_kdeck.sh
 - `GET /api/sessions/{id}/capture`
 - `POST /api/sessions/{id}/send`
 - `POST /api/sessions/{id}/interrupt`
+- `POST /api/sessions/{id}/terminate`
 
 ## Security
 
 - Bind behind firewall/port-forwarding with HTTPS at the edge.
 - Use `KDECK_TOKEN` for all API calls.
+- Protect `kdeck.php` with `KDECK_WEB_PASSWORD`; it can control local shell sessions.
 - Allowed working directories are controlled by `KDECK_ALLOWED_ROOTS`.
 - Avoid sudo from mobile sessions.

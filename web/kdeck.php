@@ -1,6 +1,9 @@
 <?php
+session_start();
+
 $KDECK_API_BASE = getenv('KDECK_API_BASE') ?: 'http://exbridge.ddns.net:18301';
 $KDECK_TOKEN = getenv('KDECK_TOKEN') ?: 'change-this-token';
+$KDECK_WEB_PASSWORD = getenv('KDECK_WEB_PASSWORD') ?: 'change-this-password';
 
 function kdeck_api($method, $path, $payload = null) {
     global $KDECK_API_BASE, $KDECK_TOKEN;
@@ -22,6 +25,35 @@ function kdeck_api($method, $path, $payload = null) {
     return is_array($data) ? $data : ['ok' => false, 'error' => $raw ?: 'request failed'];
 }
 function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
+
+function render_login($error = '') {
+?><!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kurage Agent Deck Login</title>
+<style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f7f9;color:#18252d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif}.box{width:min(420px,calc(100vw - 28px));background:#fff;border:1px solid #d8e2e8;border-radius:8px;padding:18px;box-sizing:border-box}h1{font-size:22px;margin:0 0 14px}label{display:grid;gap:8px;font-weight:700}input,button{font:inherit;width:100%;box-sizing:border-box;border-radius:6px}input{border:1px solid #c8d5dc;padding:10px}button{margin-top:12px;min-height:40px;border:0;background:#0b75a5;color:#fff;font-weight:800}.error{margin:0 0 12px;padding:9px;border:1px solid #e0a0a0;background:#fff1f1;border-radius:6px;color:#8d2525}.muted{margin-top:12px;color:#64727c;font-size:12px}
+</style></head><body><main class="box"><h1>Kurage Agent Deck</h1><?php if ($error): ?><p class="error"><?=h($error)?></p><?php endif; ?><form method="post"><input type="hidden" name="action" value="login"><label>Web password<input type="password" name="password" autocomplete="current-password" autofocus></label><button type="submit">Login</button></form><div class="muted">kdeck.php</div></main></body></html><?php
+}
+
+if (isset($_GET['logout'])) {
+    $_SESSION = [];
+    session_destroy();
+    header('Location: kdeck.php');
+    exit;
+}
+
+if (empty($_SESSION['kdeck_authenticated'])) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login') {
+        if (hash_equals($KDECK_WEB_PASSWORD, (string)($_POST['password'] ?? ''))) {
+            session_regenerate_id(true);
+            $_SESSION['kdeck_authenticated'] = true;
+            header('Location: kdeck.php');
+            exit;
+        }
+        render_login('password mismatch');
+        exit;
+    }
+    render_login();
+    exit;
+}
 
 if (isset($_GET['api']) && $_GET['api'] === 'capture') {
     header('Content-Type: application/json; charset=UTF-8');
@@ -60,8 +92,8 @@ $roots = $config['allowed_roots'] ?? ['/home/kojima/work/url2ai'];
 $active = $_GET['id'] ?? (($sessions['sessions'][0]['id'] ?? '') ?: '');
 ?><!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kurage Agent Deck</title>
 <style>
-body{margin:0;background:#f4f7f9;color:#18252d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif}header{position:sticky;top:0;background:#fff;border-bottom:1px solid #d8e2e8;z-index:2}.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px}.brand{font-weight:900}.wrap{display:grid;grid-template-columns:310px 1fr;gap:14px;padding:14px}.panel{background:#fff;border:1px solid #d8e2e8;border-radius:8px;padding:12px}.session{display:block;padding:10px;border-bottom:1px solid #e3ebef;color:inherit;text-decoration:none}.session.active{background:#e8f6fb}.muted{color:#64727c;font-size:12px}.msg{margin:0 14px;padding:10px;background:#fff7df;border:1px solid #ecd28b;border-radius:6px}.row{display:grid;gap:8px;margin-bottom:8px}input,select,textarea,button{font:inherit}input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #c8d5dc;border-radius:6px;padding:8px}button{min-height:38px;border:0;border-radius:6px;background:#0b75a5;color:#fff;font-weight:800;padding:8px 12px}.danger{background:#bb3e3e}.console{white-space:pre-wrap;overflow:auto;background:#08151d;color:#d8f3ff;border-radius:8px;padding:12px;min-height:58vh;max-height:68vh;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.45}.sendbox{display:grid;grid-template-columns:1fr auto auto;gap:8px;margin-top:10px}@media(max-width:820px){.wrap{grid-template-columns:1fr}.console{min-height:50vh}.sendbox{grid-template-columns:1fr}.bar{align-items:flex-start;flex-direction:column}}
-</style></head><body><header><div class="bar"><div class="brand">Kurage Agent Deck</div><div class="muted">kdeck.php</div></div></header>
+body{margin:0;background:#f4f7f9;color:#18252d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif}header{position:sticky;top:0;background:#fff;border-bottom:1px solid #d8e2e8;z-index:2}.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px}.brand{font-weight:900}.wrap{display:grid;grid-template-columns:310px 1fr;gap:14px;padding:14px}.panel{background:#fff;border:1px solid #d8e2e8;border-radius:8px;padding:12px}.session{display:block;padding:10px;border-bottom:1px solid #e3ebef;color:inherit;text-decoration:none}.session.active{background:#e8f6fb}.muted{color:#64727c;font-size:12px}.logout{color:#0b75a5;font-weight:800;text-decoration:none}.msg{margin:0 14px;padding:10px;background:#fff7df;border:1px solid #ecd28b;border-radius:6px}.row{display:grid;gap:8px;margin-bottom:8px}input,select,textarea,button{font:inherit}input,select,textarea{width:100%;box-sizing:border-box;border:1px solid #c8d5dc;border-radius:6px;padding:8px}button{min-height:38px;border:0;border-radius:6px;background:#0b75a5;color:#fff;font-weight:800;padding:8px 12px}.danger{background:#bb3e3e}.console{white-space:pre-wrap;overflow:auto;background:#08151d;color:#d8f3ff;border-radius:8px;padding:12px;min-height:58vh;max-height:68vh;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;line-height:1.45}.sendbox{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;margin-top:10px}@media(max-width:820px){.wrap{grid-template-columns:1fr}.console{min-height:50vh}.sendbox{grid-template-columns:1fr}.bar{align-items:flex-start;flex-direction:column}}
+</style></head><body><header><div class="bar"><div class="brand">Kurage Agent Deck</div><div class="muted">kdeck.php · <a class="logout" href="?logout=1">Logout</a></div></div></header>
 <?php if ($message): ?><div class="msg"><?=h($message)?></div><?php endif; ?>
 <div class="wrap"><aside class="panel"><h2>Sessions</h2>
 <?php foreach (($sessions['sessions'] ?? []) as $s): ?><a class="session <?=($active===$s['id']?'active':'')?>" href="?id=<?=h($s['id'])?>"><b><?=h($s['name'])?></b><div class="muted"><?=h($s['id'])?></div></a><?php endforeach; ?>
