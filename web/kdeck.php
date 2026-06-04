@@ -92,6 +92,8 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 <script>
 	let chatThread = '';
 	const chatlog = document.getElementById('chatlog');
+	const folderSelect = document.getElementById('chat-cwd');
+	const modelInput = document.getElementById('chat-model');
 	const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 	const canSpeak = 'speechSynthesis' in window;
 	const voiceInputButton = document.getElementById('voice-input');
@@ -102,6 +104,16 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	let recognition = null;
 	let recognizing = false;
 	let submitAfterVoice = false;
+	const savedFolder = localStorage.getItem('kdeck.folder');
+	const savedModel = localStorage.getItem('kdeck.model');
+	if(savedFolder && [...folderSelect.options].some(option => option.value === savedFolder)){
+	  folderSelect.value = savedFolder;
+	}
+	if(savedModel){
+	  modelInput.value = savedModel;
+	}
+	folderSelect.addEventListener('change', () => localStorage.setItem('kdeck.folder', folderSelect.value));
+	modelInput.addEventListener('change', () => localStorage.setItem('kdeck.model', modelInput.value));
 
 	function setVoiceStatus(text){
 	  voiceStatus.textContent = text || '';
@@ -206,10 +218,12 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	  input.value = '';
 	  addBubble('user', prompt);
 	  const pending = addBubble('assistant', '実行中...');
+	  localStorage.setItem('kdeck.folder', folderSelect.value);
+	  localStorage.setItem('kdeck.model', modelInput.value);
 	  const res = await fetch('?api=chat', {
 	    method:'POST',
 	    headers:{'Content-Type':'application/json'},
-	    body:JSON.stringify({prompt, thread_id:chatThread, cwd:document.getElementById('chat-cwd').value, model:document.getElementById('chat-model').value})
+	    body:JSON.stringify({prompt, thread_id:chatThread, cwd:folderSelect.value, model:modelInput.value})
 	  });
 	  const data = await res.json();
 	  if(data.thread_id) chatThread = data.thread_id;
