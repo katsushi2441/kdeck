@@ -3,3 +3,6 @@
 __pycache__/
 *.pyc
 storage/
+web/.env
+web/kdeck.env
+web/kdeck_config.php

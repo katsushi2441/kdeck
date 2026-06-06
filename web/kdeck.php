@@ -2,8 +2,63 @@
 require_once __DIR__ . '/auth_common.php';
 date_default_timezone_set('Asia/Tokyo');
 
-$KDECK_API_BASE = getenv('KDECK_API_BASE') ?: 'http://exbridge.ddns.net:18301';
-$KDECK_TOKEN = getenv('KDECK_TOKEN') ?: 'change-this-token';
+function kdeck_load_env_file($path) {
+    if (!is_readable($path)) {
+        return;
+    }
+    $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if (!is_array($lines)) {
+        return;
+    }
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '' || $line[0] === '#' || strpos($line, '=') === false) {
+            continue;
+        }
+        list($key, $value) = explode('=', $line, 2);
+        $key = trim($key);
+        $value = trim($value);
+        if ($key === '' || !preg_match('/^[A-Z0-9_]+$/', $key)) {
+            continue;
+        }
+        $first = substr($value, 0, 1);
+        $last = substr($value, -1);
+        if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
+            $value = substr($value, 1, -1);
+        }
+        if (getenv($key) === false) {
+            putenv($key . '=' . $value);
+        }
+        if (!isset($_ENV[$key])) {
+            $_ENV[$key] = $value;
+        }
+    }
+}
+
+function kdeck_env($key, $default = '') {
+    if (defined($key)) {
+        $value = constant($key);
+        if ($value !== '') {
+            return $value;
+        }
+    }
+    $value = getenv($key);
+    if ($value !== false && $value !== '') {
+        return $value;
+    }
+    return isset($_ENV[$key]) && $_ENV[$key] !== '' ? $_ENV[$key] : $default;
+}
+
+$KDECK_LOCAL_CONFIG = __DIR__ . '/kdeck_config.php';
+if (is_readable($KDECK_LOCAL_CONFIG)) {
+    require_once $KDECK_LOCAL_CONFIG;
+}
+kdeck_load_env_file(__DIR__ . '/kdeck.env');
+kdeck_load_env_file(__DIR__ . '/.env');
+kdeck_load_env_file(__DIR__ . '/../.env');
+
+$KDECK_API_BASE = kdeck_env('KDECK_API_BASE', 'http://exbridge.ddns.net:18301');
+$KDECK_TOKEN = kdeck_env('KDECK_TOKEN', 'change-this-token');
 $KDECK_RETURN_URL = 'https://kurage.exbridge.jp/kdeck.php';
 $auth = url2ai_auth_bootstrap();
 $logged_in = !empty($auth['logged_in']);

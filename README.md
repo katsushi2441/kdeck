@@ -40,6 +40,10 @@ pip install -r requirements.txt
 scripts/run_kdeck.sh
 ```
 
+For the deployed PHP proxy, copy `web/kdeck_config.sample.php` to
+`web/kdeck_config.php` on the web server and set the same `KDECK_TOKEN` used by
+the FastAPI server. The real `kdeck_config.php` is intentionally ignored by git.
+
 `KDECK_CODEX_SANDBOX` controls the Codex CLI sandbox mode. Use `danger-full-access`
 only on a trusted, login-protected deployment when Codex needs network access for
 operations such as `git push`.
