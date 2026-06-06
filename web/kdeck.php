@@ -130,6 +130,12 @@ if (isset($_GET['api']) && $_GET['api'] === 'chat_job') {
     echo json_encode(kdeck_api('GET', '/api/chat/' . rawurlencode($id)), JSON_UNESCAPED_UNICODE);
     exit;
 }
+if (isset($_GET['api']) && $_GET['api'] === 'chat_cancel') {
+    header('Content-Type: application/json; charset=UTF-8');
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
+    echo json_encode(kdeck_api('POST', '/api/chat/' . rawurlencode($id) . '/cancel', []), JSON_UNESCAPED_UNICODE);
+    exit;
+}
 if (isset($_GET['api']) && $_GET['api'] === 'chat_threads') {
     header('Content-Type: application/json; charset=UTF-8');
     echo json_encode(kdeck_api('GET', '/api/chat_threads'), JSON_UNESCAPED_UNICODE);
@@ -169,7 +175,7 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 <meta name="twitter:image" content="https://kurage.exbridge.jp/images/kdeck.png">
 <style>
 	:root{--bg:#eef4f6;--panel:#ffffff;--line:#d5e1e6;--text:#17242c;--muted:#60717b;--brand:#087d9a;--brand2:#0f9b8e;--soft:#e9f5f6;--danger:#b03a2e}
-	*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif}header{position:sticky;top:0;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);z-index:2;backdrop-filter:blur(10px)}.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px}.brand{display:flex;align-items:center;gap:10px;font-weight:900;min-width:0}.brand-icon{width:42px;height:42px;border-radius:50%;object-fit:cover;box-shadow:0 2px 8px rgba(0,127,150,.18);flex:0 0 auto}.brand-title{display:grid;line-height:1.15;min-width:0}.brand-title b,.brand-title span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title span{font-size:12px;color:var(--muted);font-weight:700}.account{flex:0 0 auto;max-width:45vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}.wrap{display:grid;grid-template-columns:320px 1fr;gap:12px;padding:12px;height:calc(100vh - 64px)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;min-height:0}.side{display:flex;flex-direction:column;overflow:hidden}.side-top{padding:12px;border-bottom:1px solid var(--line)}.main{display:flex;flex-direction:column;padding:0;overflow:hidden}.main-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}h2{font-size:16px;margin:0}.muted{color:var(--muted);font-size:12px}.logout{color:var(--brand);font-weight:800;text-decoration:none}.row{display:grid;gap:6px;margin-bottom:8px}input,select,textarea,button{font:inherit}input,select,textarea{width:100%;border:1px solid #c8d5dc;border-radius:6px;padding:8px;background:#fff}button{min-height:36px;border:0;border-radius:6px;background:var(--brand);color:#fff;font-weight:800;padding:8px 12px;cursor:pointer}button.secondary{background:#e7eef2;color:var(--text)}button.active{background:var(--danger);color:#fff}button:disabled{cursor:not-allowed;opacity:.55}.history{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px}.history-item{border:1px solid transparent;background:transparent;color:var(--text);text-align:left;font-weight:700;min-height:0;padding:9px;border-radius:6px}.history-item:hover,.history-item.active{background:var(--soft);border-color:#c5dde3}.history-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-meta{display:block;color:var(--muted);font-size:11px;font-weight:600;margin-top:3px}.chatlog{display:flex;flex-direction:column;gap:12px;flex:1;overflow:auto;padding:14px}.bubble{max-width:92%;border-radius:8px;padding:10px 12px;white-space:pre-wrap;line-height:1.55}.user{align-self:flex-end;background:#dff0f7}.assistant{align-self:flex-start;background:#f0f4f7}.voicebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line)}.voicebar label{display:flex;align-items:center;gap:6px}.voicebar input{width:auto}.composer{display:grid;grid-template-columns:1fr auto auto;gap:8px;padding:0 14px 14px}.composer textarea{resize:vertical;min-height:82px}.empty-history{padding:10px;color:var(--muted);font-size:12px}body{background:linear-gradient(180deg,#f7fcfd 0%,#edf7f9 46%,#f8fbfb 100%);color:#17242c}header{background:rgba(255,255,255,.88);border-bottom-color:#cfe0e6;box-shadow:0 8px 24px rgba(36,78,92,.08)}.bar{height:60px;padding:9px 16px}.brand-icon{width:40px;height:40px}.brand-title b{color:#17313a}.brand-title span,.muted{color:#647884}.logout{color:#087d9a}.wrap{gap:14px;padding:14px;height:calc(100vh - 60px)}.panel{border:1px solid #d5e5ea;border-radius:8px;box-shadow:0 12px 34px rgba(36,78,92,.09)}.side{background:linear-gradient(180deg,#ffffff 0%,#eef9fb 100%)}.side-top{border-bottom:1px solid #d6e8ed}.side h2{color:#17313a}.main{background:#ffffff;color:#18252d}.main-head{min-height:52px;background:#ffffff;border-bottom:1px solid #dce9ee}.row label{letter-spacing:.02em;text-transform:uppercase}input,select,textarea{border-color:#c7d8df;background:#ffffff;color:#17242c}input:focus,select:focus,textarea:focus{outline:2px solid rgba(8,125,154,.16);border-color:#0b8aa6}button{background:#087d9a;box-shadow:0 3px 10px rgba(8,125,154,.16)}button:hover{filter:brightness(1.04)}button.secondary{background:#edf5f7;color:#17313a;box-shadow:none}.history{padding:9px}.history-item{color:#17313a;border-color:transparent}.history-item:hover,.history-item.active{background:#e5f5f7;border-color:#bfe0e8}.history-meta{color:#718691}.chatlog{background:linear-gradient(180deg,#ffffff 0%,#f1f8fa 100%)}.bubble{box-shadow:0 2px 8px rgba(36,78,92,.07)}.assistant{background:#ffffff;border:1px solid #dce9ee}.user{background:#dff4f7;border:1px solid #bfe4ec}.voicebar{background:#ffffff;border-top:1px solid #dce9ee}.composer{background:#ffffff}.memo-panel{background:#ffffff;border-top:1px solid #dce9ee;padding:0 14px 14px}.memo-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.memo-actions{display:flex;gap:8px;flex-wrap:wrap}.memo-actions button{min-height:30px;padding:6px 10px}.memo-panel textarea{min-height:96px;resize:vertical;background:#fbfeff}@media(max-width:820px){.wrap{grid-template-columns:1fr;height:auto}.side{max-height:38vh}.main{min-height:62vh}.composer{grid-template-columns:1fr 1fr}.composer textarea{grid-column:1/-1}.bar{height:54px;padding:7px 10px;align-items:center;flex-direction:row}.brand{gap:7px;flex:1 1 auto}.brand-icon{width:34px;height:34px}.brand-title b{font-size:14px}.brand-title span{display:none}.account{max-width:42vw;font-size:11px}.memo-head{align-items:flex-start;flex-direction:column}}
+	*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif}header{position:sticky;top:0;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);z-index:2;backdrop-filter:blur(10px)}.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px}.brand{display:flex;align-items:center;gap:10px;font-weight:900;min-width:0}.brand-icon{width:42px;height:42px;border-radius:50%;object-fit:cover;box-shadow:0 2px 8px rgba(0,127,150,.18);flex:0 0 auto}.brand-title{display:grid;line-height:1.15;min-width:0}.brand-title b,.brand-title span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title span{font-size:12px;color:var(--muted);font-weight:700}.account{flex:0 0 auto;max-width:45vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}.wrap{display:grid;grid-template-columns:320px 1fr;gap:12px;padding:12px;height:calc(100vh - 64px)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;min-height:0}.side{display:flex;flex-direction:column;overflow:hidden}.side-top{padding:12px;border-bottom:1px solid var(--line)}.main{display:flex;flex-direction:column;padding:0;overflow:hidden}.main-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}h2{font-size:16px;margin:0}.muted{color:var(--muted);font-size:12px}.logout{color:var(--brand);font-weight:800;text-decoration:none}.row{display:grid;gap:6px;margin-bottom:8px}input,select,textarea,button{font:inherit}input,select,textarea{width:100%;border:1px solid #c8d5dc;border-radius:6px;padding:8px;background:#fff}button{min-height:36px;border:0;border-radius:6px;background:var(--brand);color:#fff;font-weight:800;padding:8px 12px;cursor:pointer}button.secondary{background:#e7eef2;color:var(--text)}button.active{background:var(--danger);color:#fff}button:disabled{cursor:not-allowed;opacity:.55}.history{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px}.history-item{border:1px solid transparent;background:transparent;color:var(--text);text-align:left;font-weight:700;min-height:0;padding:9px;border-radius:6px}.history-item:hover,.history-item.active{background:var(--soft);border-color:#c5dde3}.history-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-meta{display:block;color:var(--muted);font-size:11px;font-weight:600;margin-top:3px}.chatlog{display:flex;flex-direction:column;gap:12px;flex:1;overflow:auto;padding:14px}.bubble{max-width:92%;border-radius:8px;padding:10px 12px;white-space:pre-wrap;line-height:1.55}.user{align-self:flex-end;background:#dff0f7}.assistant{align-self:flex-start;background:#f0f4f7}.runline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}.runline button{min-height:28px;padding:5px 9px;font-size:12px}.voicebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line)}.voicebar label{display:flex;align-items:center;gap:6px}.voicebar input{width:auto}.composer{display:grid;grid-template-columns:1fr auto auto;gap:8px;padding:0 14px 14px}.composer textarea{resize:vertical;min-height:82px}.empty-history{padding:10px;color:var(--muted);font-size:12px}body{background:linear-gradient(180deg,#f7fcfd 0%,#edf7f9 46%,#f8fbfb 100%);color:#17242c}header{background:rgba(255,255,255,.88);border-bottom-color:#cfe0e6;box-shadow:0 8px 24px rgba(36,78,92,.08)}.bar{height:60px;padding:9px 16px}.brand-icon{width:40px;height:40px}.brand-title b{color:#17313a}.brand-title span,.muted{color:#647884}.logout{color:#087d9a}.wrap{gap:14px;padding:14px;height:calc(100vh - 60px)}.panel{border:1px solid #d5e5ea;border-radius:8px;box-shadow:0 12px 34px rgba(36,78,92,.09)}.side{background:linear-gradient(180deg,#ffffff 0%,#eef9fb 100%)}.side-top{border-bottom:1px solid #d6e8ed}.side h2{color:#17313a}.main{background:#ffffff;color:#18252d}.main-head{min-height:52px;background:#ffffff;border-bottom:1px solid #dce9ee}.row label{letter-spacing:.02em;text-transform:uppercase}input,select,textarea{border-color:#c7d8df;background:#ffffff;color:#17242c}input:focus,select:focus,textarea:focus{outline:2px solid rgba(8,125,154,.16);border-color:#0b8aa6}button{background:#087d9a;box-shadow:0 3px 10px rgba(8,125,154,.16)}button:hover{filter:brightness(1.04)}button.secondary{background:#edf5f7;color:#17313a;box-shadow:none}button.danger{background:#b03a2e;color:#fff}.history{padding:9px}.history-item{color:#17313a;border-color:transparent}.history-item:hover,.history-item.active{background:#e5f5f7;border-color:#bfe0e8}.history-meta{color:#718691}.chatlog{background:linear-gradient(180deg,#ffffff 0%,#f1f8fa 100%)}.bubble{box-shadow:0 2px 8px rgba(36,78,92,.07)}.assistant{background:#ffffff;border:1px solid #dce9ee}.user{background:#dff4f7;border:1px solid #bfe4ec}.voicebar{background:#ffffff;border-top:1px solid #dce9ee}.composer{background:#ffffff}.memo-panel{background:#ffffff;border-top:1px solid #dce9ee;padding:0 14px 14px}.memo-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.memo-actions{display:flex;gap:8px;flex-wrap:wrap}.memo-actions button{min-height:30px;padding:6px 10px}.memo-panel textarea{min-height:96px;resize:vertical;background:#fbfeff}@media(max-width:820px){.wrap{grid-template-columns:1fr;height:auto}.side{max-height:38vh}.main{min-height:62vh}.composer{grid-template-columns:1fr 1fr}.composer textarea{grid-column:1/-1}.bar{height:54px;padding:7px 10px;align-items:center;flex-direction:row}.brand{gap:7px;flex:1 1 auto}.brand-icon{width:34px;height:34px}.brand-title b{font-size:14px}.brand-title span{display:none}.account{max-width:42vw;font-size:11px}.memo-head{align-items:flex-start;flex-direction:column}}
 </style></head><body><header><div class="bar"><div class="brand"><img class="brand-icon" src="/images/kurage-icon.png" alt="Kurage"><span class="brand-title"><b>Kurage Agent Deck</b><span>Codex CLI web console</span></span></div><div class="muted account">@<?=h($session_user)?> · <a class="logout" href="<?=h($logout_url)?>">Logout</a></div></div></header>
 <div class="wrap"><aside class="panel side"><div class="side-top"><h2>Chat</h2>
 <div class="row"><label class="muted">Folder</label><select id="chat-cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div>
@@ -326,6 +332,30 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	  chatlog.scrollTop = chatlog.scrollHeight;
 	  return div;
 	}
+	function attachRunControls(bubble, jobId){
+	  const line = document.createElement('div');
+	  line.className = 'runline';
+	  const status = document.createElement('span');
+	  status.className = 'muted';
+	  status.textContent = '開始中...';
+	  const cancel = document.createElement('button');
+	  cancel.type = 'button';
+	  cancel.className = 'danger';
+	  cancel.textContent = '停止';
+	  cancel.addEventListener('click', async () => {
+	    cancel.disabled = true;
+	    status.textContent = '停止中...';
+	    try{
+	      await fetch('?api=chat_cancel&id=' + encodeURIComponent(jobId), {method:'POST', cache:'no-store'});
+	    }catch(e){
+	      status.textContent = '停止リクエストに失敗';
+	    }
+	  });
+	  line.appendChild(status);
+	  line.appendChild(cancel);
+	  bubble.appendChild(line);
+	  return {line, status, cancel};
+	}
 	if(!SpeechRecognition){
 	  voiceInputButton.disabled = true;
 	  sendVoiceButton.disabled = true;
@@ -418,7 +448,14 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	    headers:{'Content-Type':'application/json'},
 	    body:JSON.stringify({prompt, thread_id:chatThread, cwd:folderSelect.value, model:modelInput.value})
 	  });
-	  const data = await res.json();
+	  let data;
+	  try{
+	    data = await res.json();
+	  }catch(e){
+	    pending.textContent = 'チャット開始に失敗しました。';
+	    setChatState('failed');
+	    return;
+	  }
 	  if(data.thread_id) chatThread = data.thread_id;
 	  setActiveHistory();
 	  if(!data.job_id){
@@ -427,16 +464,30 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	    speakText(pending.textContent);
 	    return;
 	  }
+	  const runControls = attachRunControls(pending, data.job_id);
+	  let pollCount = 0;
 	  async function pollChat(){
-	    const jobRes = await fetch('?api=chat_job&id=' + encodeURIComponent(data.job_id), {cache:'no-store'});
-	    const job = await jobRes.json();
+	    pollCount += 1;
+	    let job;
+	    try{
+	      const jobRes = await fetch('?api=chat_job&id=' + encodeURIComponent(data.job_id), {cache:'no-store'});
+	      job = await jobRes.json();
+	    }catch(e){
+	      pending.firstChild.textContent = '状態取得に失敗しました。画面を再読み込みしてください。';
+	      runControls.status.textContent = 'poll failed';
+	      runControls.cancel.disabled = true;
+	      setChatState('failed');
+	      return;
+	    }
 	    if(job.status === 'running'){
-	      pending.textContent = '実行中...';
+	      const elapsed = Number(job.elapsed || 0);
+	      pending.firstChild.textContent = '実行中...';
+	      runControls.status.textContent = elapsed ? `経過 ${elapsed}秒` : `確認中 ${pollCount}`;
 	      setTimeout(pollChat, 1500);
 	      return;
 	    }
 	    if(job.thread_id) chatThread = job.thread_id;
-	    pending.textContent = job.message || job.error || JSON.stringify(job, null, 2);
+	    pending.textContent = job.message || job.error || job.detail || JSON.stringify(job, null, 2);
 	    chatlog.scrollTop = chatlog.scrollHeight;
 	    chatTitle.textContent = prompt.length > 52 ? prompt.slice(0, 52) + '...' : prompt;
 	    setChatState(job.status || 'finished');

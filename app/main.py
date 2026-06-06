@@ -159,6 +159,7 @@ TICKETS: dict[str, tuple[str, float]] = {}
 CHAT_THREADS: dict[str, list[dict[str, str]]] = {}
 CHAT_META: dict[str, dict[str, Any]] = {}
 CHAT_JOBS: dict[str, dict[str, Any]] = {}
+CHAT_PROCESSES: dict[str, subprocess.Popen[str]] = {}
 
 
 def require_auth(authorization: str = Header(default="")) -> None:
@@ -337,7 +338,7 @@ def config() -> dict[str, Any]:
     return {"ok": True, "allowed_roots": [str(p) for p in ALLOWED_ROOTS], "codex_cmd": CODEX_CMD, "codex_model": CODEX_MODEL, "backend": "pty"}
 
 
-def run_codex_exec(cwd: Path, model: str, prompt: str) -> dict[str, Any]:
+def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "") -> dict[str, Any]:
     cmd = [
         CODEX_CMD,
         "exec",
@@ -350,18 +351,37 @@ def run_codex_exec(cwd: Path, model: str, prompt: str) -> dict[str, Any]:
         CODEX_SANDBOX,
         "-",
     ]
-    proc = subprocess.run(
+    proc = subprocess.Popen(
         cmd,
-        input=prompt,
         text=True,
         cwd=str(cwd),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        timeout=900,
+        stdin=subprocess.PIPE,
+        start_new_session=True,
     )
+    if job_id:
+        CHAT_PROCESSES[job_id] = proc
+    try:
+        stdout, stderr = proc.communicate(input=prompt, timeout=900)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = proc.communicate()
+        return {
+            "returncode": 124,
+            "text": "Codex CLI timed out after 900 seconds.",
+            "stderr_tail": (stderr or "")[-4000:],
+            "events": [],
+        }
+    finally:
+        if job_id:
+            CHAT_PROCESSES.pop(job_id, None)
     final_text = ""
     events: list[dict[str, Any]] = []
-    for line in proc.stdout.splitlines():
+    for line in stdout.splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
@@ -373,11 +393,11 @@ def run_codex_exec(cwd: Path, model: str, prompt: str) -> dict[str, Any]:
         if event.get("type") == "turn.failed" and not final_text:
             final_text = str(event.get("error", {}).get("message", "Codex turn failed"))
     if proc.returncode != 0 and not final_text:
-        final_text = (proc.stderr or proc.stdout or f"codex exited with {proc.returncode}").strip()
+        final_text = (stderr or stdout or f"codex exited with {proc.returncode}").strip()
     return {
         "returncode": proc.returncode,
         "text": final_text,
-        "stderr_tail": proc.stderr[-4000:],
+        "stderr_tail": stderr[-4000:],
         "events": events[-20:],
     }
 
@@ -403,7 +423,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
 
     def worker() -> None:
         try:
-            result = run_chat_turn(cwd, model, thread_id, req.prompt)
+            result = run_chat_turn(cwd, model, thread_id, req.prompt, job_id)
             CHAT_JOBS[job_id].update(result)
             CHAT_JOBS[job_id]["status"] = "finished"
             CHAT_JOBS[job_id]["finished"] = int(time.time())
@@ -419,7 +439,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
     return CHAT_JOBS[job_id]
 
 
-def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str) -> dict[str, Any]:
+def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_id: str = "") -> dict[str, Any]:
     history = load_thread(thread_id)
     transcript = "\n\n".join(
         f"{m['role'].upper()}:\n{m['content']}" for m in history[-12:]
@@ -433,7 +453,7 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str) -> di
     )
     history.append({"role": "user", "content": user_prompt})
     save_thread(thread_id, str(cwd), model)
-    result = run_codex_exec(cwd, model, prompt)
+    result = run_codex_exec(cwd, model, prompt, job_id)
     assistant_text = result["text"] or "(no response)"
     history.append({"role": "assistant", "content": assistant_text})
     save_thread(thread_id, str(cwd), model)
@@ -452,6 +472,28 @@ def chat_job(job_id: str) -> dict[str, Any]:
     job = CHAT_JOBS.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="chat job not found")
+    if job.get("status") == "running":
+        job["elapsed"] = int(time.time()) - int(job.get("created") or time.time())
+    return job
+
+
+@app.post("/api/chat/{job_id}/cancel", dependencies=[Depends(require_auth)])
+def cancel_chat_job(job_id: str) -> dict[str, Any]:
+    job = CHAT_JOBS.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="chat job not found")
+    proc = CHAT_PROCESSES.get(job_id)
+    if proc is not None and proc.poll() is None:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    job.update({
+        "ok": False,
+        "status": "failed",
+        "error": "cancelled",
+        "finished": int(time.time()),
+    })
     return job
 
 
