@@ -29,6 +29,21 @@ TOKEN = os.environ.get("KDECK_TOKEN", "")
 CODEX_CMD = os.environ.get("KDECK_CODEX_CMD", "codex")
 CODEX_MODEL = os.environ.get("KDECK_CODEX_MODEL", "gpt-5.4-mini")
 CODEX_SANDBOX = os.environ.get("KDECK_CODEX_SANDBOX", "workspace-write")
+CODEX_EXECUTION_MODES = {
+    "confirm": {
+        "label": "確認して実行",
+        "sandbox": "workspace-write",
+        "description": "送信前に確認し、Codex CLIはworkspace-writeで実行します。",
+    },
+    "full-access": {
+        "label": "Full access",
+        "sandbox": "danger-full-access",
+        "description": "確認なしでCodex CLIをdanger-full-accessで実行します。",
+    },
+}
+DEFAULT_EXECUTION_MODE = os.environ.get("KDECK_DEFAULT_EXECUTION_MODE", "confirm").strip() or "confirm"
+if DEFAULT_EXECUTION_MODE not in CODEX_EXECUTION_MODES:
+    DEFAULT_EXECUTION_MODE = "confirm"
 DATA_DIR = Path(os.environ.get("KDECK_DATA_DIR", Path(__file__).resolve().parents[1] / "storage")).expanduser()
 CHAT_DIR = DATA_DIR / "chat_threads"
 ALLOWED_ROOTS = [
@@ -56,6 +71,7 @@ class ChatRequest(BaseModel):
     cwd: str = "/home/kojima/work/url2ai"
     thread_id: str = ""
     model: str = ""
+    execution_mode: str = DEFAULT_EXECUTION_MODE
 
 
 class Session:
@@ -226,6 +242,7 @@ def load_thread(thread_id: str) -> list[dict[str, str]]:
             "title": str(payload.get("title") or thread_title(clean_messages)),
             "cwd": str(payload.get("cwd") or ""),
             "model": str(payload.get("model") or ""),
+            "execution_mode": str(payload.get("execution_mode") or DEFAULT_EXECUTION_MODE),
             "created": int(payload.get("created") or 0),
             "updated": int(payload.get("updated") or 0),
         }
@@ -248,12 +265,13 @@ def save_thread(thread_id: str, cwd: str, model: str) -> None:
         "title": thread_title(messages),
         "cwd": cwd,
         "model": model,
+        "execution_mode": str(meta.get("execution_mode") or DEFAULT_EXECUTION_MODE),
         "created": created,
         "updated": now,
         "messages": messages[-80:],
     }
     thread_path(thread_id).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    CHAT_META[thread_id] = {k: payload[k] for k in ("id", "title", "cwd", "model", "created", "updated")}
+    CHAT_META[thread_id] = {k: payload[k] for k in ("id", "title", "cwd", "model", "execution_mode", "created", "updated")}
 
 
 def list_chat_threads() -> list[dict[str, Any]]:
@@ -268,6 +286,7 @@ def list_chat_threads() -> list[dict[str, Any]]:
                 "title": str(payload.get("title") or thread_title(messages)),
                 "cwd": str(payload.get("cwd") or ""),
                 "model": str(payload.get("model") or ""),
+                "execution_mode": str(payload.get("execution_mode") or DEFAULT_EXECUTION_MODE),
                 "created": int(payload.get("created") or 0),
                 "updated": int(payload.get("updated") or 0),
                 "messages": len(messages),
@@ -285,6 +304,11 @@ def validate_cwd(cwd: str) -> Path:
         if path == root or root in path.parents:
             return path
     raise HTTPException(status_code=400, detail="cwd is not allowed")
+
+
+def normalize_execution_mode(mode: str) -> str:
+    mode = (mode or "").strip()
+    return mode if mode in CODEX_EXECUTION_MODES else DEFAULT_EXECUTION_MODE
 
 
 def get_session(session_id: str) -> Session:
@@ -335,10 +359,21 @@ def healthz() -> dict[str, Any]:
 
 @app.get("/api/config", dependencies=[Depends(require_auth)])
 def config() -> dict[str, Any]:
-    return {"ok": True, "allowed_roots": [str(p) for p in ALLOWED_ROOTS], "codex_cmd": CODEX_CMD, "codex_model": CODEX_MODEL, "backend": "pty"}
+    return {
+        "ok": True,
+        "allowed_roots": [str(p) for p in ALLOWED_ROOTS],
+        "codex_cmd": CODEX_CMD,
+        "codex_model": CODEX_MODEL,
+        "codex_sandbox": CODEX_SANDBOX,
+        "execution_modes": CODEX_EXECUTION_MODES,
+        "default_execution_mode": DEFAULT_EXECUTION_MODE,
+        "backend": "pty",
+    }
 
 
-def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "") -> dict[str, Any]:
+def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE) -> dict[str, Any]:
+    execution_mode = normalize_execution_mode(execution_mode)
+    sandbox = CODEX_EXECUTION_MODES[execution_mode]["sandbox"]
     cmd = [
         CODEX_CMD,
         "exec",
@@ -348,7 +383,7 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "") -> dict
         "--cd",
         str(cwd),
         "--sandbox",
-        CODEX_SANDBOX,
+        sandbox,
         "-",
     ]
     proc = subprocess.Popen(
@@ -399,6 +434,8 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "") -> dict
         "text": final_text,
         "stderr_tail": stderr[-4000:],
         "events": events[-20:],
+        "execution_mode": execution_mode,
+        "sandbox": sandbox,
     }
 
 
@@ -406,6 +443,8 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "") -> dict
 def chat(req: ChatRequest) -> dict[str, Any]:
     cwd = validate_cwd(req.cwd)
     model = req.model.strip() or CODEX_MODEL
+    execution_mode = normalize_execution_mode(req.execution_mode)
+    sandbox = CODEX_EXECUTION_MODES[execution_mode]["sandbox"]
     thread_id = safe_thread_id(req.thread_id) or f"chat-{uuid.uuid4().hex[:8]}"
     job_id = f"chatjob-{uuid.uuid4().hex[:10]}"
     CHAT_JOBS[job_id] = {
@@ -414,6 +453,8 @@ def chat(req: ChatRequest) -> dict[str, Any]:
         "thread_id": thread_id,
         "status": "running",
         "model": model,
+        "execution_mode": execution_mode,
+        "sandbox": sandbox,
         "cwd": str(cwd),
         "message": "",
         "error": "",
@@ -423,7 +464,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
 
     def worker() -> None:
         try:
-            result = run_chat_turn(cwd, model, thread_id, req.prompt, job_id)
+            result = run_chat_turn(cwd, model, thread_id, req.prompt, job_id, execution_mode)
             CHAT_JOBS[job_id].update(result)
             CHAT_JOBS[job_id]["status"] = "finished"
             CHAT_JOBS[job_id]["finished"] = int(time.time())
@@ -439,7 +480,9 @@ def chat(req: ChatRequest) -> dict[str, Any]:
     return CHAT_JOBS[job_id]
 
 
-def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_id: str = "") -> dict[str, Any]:
+def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE) -> dict[str, Any]:
+    execution_mode = normalize_execution_mode(execution_mode)
+    sandbox = CODEX_EXECUTION_MODES[execution_mode]["sandbox"]
     history = load_thread(thread_id)
     transcript = "\n\n".join(
         f"{m['role'].upper()}:\n{m['content']}" for m in history[-12:]
@@ -452,8 +495,9 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         + user_prompt
     )
     history.append({"role": "user", "content": user_prompt})
+    CHAT_META.setdefault(thread_id, {})["execution_mode"] = execution_mode
     save_thread(thread_id, str(cwd), model)
-    result = run_codex_exec(cwd, model, prompt, job_id)
+    result = run_codex_exec(cwd, model, prompt, job_id, execution_mode)
     assistant_text = result["text"] or "(no response)"
     history.append({"role": "assistant", "content": assistant_text})
     save_thread(thread_id, str(cwd), model)
@@ -461,6 +505,8 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         "ok": result["returncode"] == 0,
         "thread_id": thread_id,
         "model": model,
+        "execution_mode": execution_mode,
+        "sandbox": sandbox,
         "cwd": str(cwd),
         "message": assistant_text,
         "stderr_tail": result["stderr_tail"],
@@ -516,6 +562,7 @@ def chat_thread(thread_id: str) -> dict[str, Any]:
             "title": meta.get("title") or thread_title(messages),
             "cwd": meta.get("cwd") or "",
             "model": meta.get("model") or "",
+            "execution_mode": meta.get("execution_mode") or DEFAULT_EXECUTION_MODE,
             "created": meta.get("created") or 0,
             "updated": meta.get("updated") or 0,
             "messages": messages,

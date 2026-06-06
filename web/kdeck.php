@@ -164,6 +164,13 @@ $roots = !empty($config['allowed_roots']) && is_array($config['allowed_roots'])
     ? $config['allowed_roots']
     : $default_roots;
 $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
+$execution_modes = !empty($config['execution_modes']) && is_array($config['execution_modes'])
+    ? $config['execution_modes']
+    : [
+        'confirm' => ['label' => '確認して実行', 'sandbox' => 'workspace-write'],
+        'full-access' => ['label' => 'Full access', 'sandbox' => 'danger-full-access'],
+    ];
+$default_execution_mode = $config['default_execution_mode'] ?? 'confirm';
 ?><!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kurage Agent Deck</title>
 <meta name="description" content="Kurage Agent Deck is a mobile web console for Codex CLI sessions.">
 <meta property="og:title" content="Kurage Agent Deck">
@@ -180,6 +187,7 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 <div class="wrap"><aside class="panel side"><div class="side-top"><h2>Chat</h2>
 <div class="row"><label class="muted">Folder</label><select id="chat-cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div>
 <div class="row"><label class="muted">Model</label><input id="chat-model" value="<?=h($codex_model)?>"></div>
+<div class="row"><label class="muted">Execution</label><select id="execution-mode"><?php foreach ($execution_modes as $key => $mode): ?><option value="<?=h($key)?>" data-sandbox="<?=h($mode['sandbox'] ?? '')?>"<?=$key === $default_execution_mode ? ' selected' : ''?>><?=h(($mode['label'] ?? $key) . ' / ' . ($mode['sandbox'] ?? ''))?></option><?php endforeach; ?></select></div>
 <button type="button" id="new-chat">New Chat</button>
 <div class="muted" style="margin-top:8px">履歴はサーバに保存されます。</div></div>
 <div id="history" class="history"><div class="empty-history">履歴を読み込み中...</div></div>
@@ -205,6 +213,7 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	const chatState = document.getElementById('chat-state');
 	const folderSelect = document.getElementById('chat-cwd');
 	const modelInput = document.getElementById('chat-model');
+	const executionModeSelect = document.getElementById('execution-mode');
 	const chatInput = document.getElementById('chat-input');
 	const voiceMemo = document.getElementById('voice-memo');
 	const memoCopyButton = document.getElementById('memo-copy');
@@ -221,6 +230,7 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	let submitAfterVoice = false;
 	const savedFolder = localStorage.getItem('kdeck.folder');
 	const savedModel = localStorage.getItem('kdeck.model');
+	const savedExecutionMode = localStorage.getItem('kdeck.executionMode');
 	const savedMemo = localStorage.getItem('kdeck.voiceMemo');
 	if(savedFolder && [...folderSelect.options].some(option => option.value === savedFolder)){
 	  folderSelect.value = savedFolder;
@@ -228,11 +238,15 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	if(savedModel){
 	  modelInput.value = savedModel;
 	}
+	if(savedExecutionMode && [...executionModeSelect.options].some(option => option.value === savedExecutionMode)){
+	  executionModeSelect.value = savedExecutionMode;
+	}
 	if(savedMemo){
 	  voiceMemo.value = savedMemo;
 	}
 	folderSelect.addEventListener('change', () => localStorage.setItem('kdeck.folder', folderSelect.value));
 	modelInput.addEventListener('change', () => localStorage.setItem('kdeck.model', modelInput.value));
+	executionModeSelect.addEventListener('change', () => localStorage.setItem('kdeck.executionMode', executionModeSelect.value));
 	voiceMemo.addEventListener('input', () => localStorage.setItem('kdeck.voiceMemo', voiceMemo.value));
 	memoCopyButton.addEventListener('click', () => {
 	  const memo = voiceMemo.value.trim();
@@ -302,6 +316,10 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	  if(thread.model){
 	    modelInput.value = thread.model;
 	    localStorage.setItem('kdeck.model', thread.model);
+	  }
+	  if(thread.execution_mode && [...executionModeSelect.options].some(option => option.value === thread.execution_mode)){
+	    executionModeSelect.value = thread.execution_mode;
+	    localStorage.setItem('kdeck.executionMode', thread.execution_mode);
 	  }
 	  chatlog.innerHTML = '';
 	  (thread.messages || []).forEach(message => addBubble(message.role === 'user' ? 'user' : 'assistant', message.content || ''));
@@ -437,16 +455,23 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	  const input = document.getElementById('chat-input');
 	  const prompt = input.value.trim();
 	  if(!prompt) return;
+	  const executionMode = executionModeSelect.value || 'confirm';
+	  const sandbox = executionModeSelect.selectedOptions[0]?.dataset?.sandbox || '';
+	  if(executionMode === 'confirm'){
+	    const ok = window.confirm(`この指示を実行しますか？\n\nMode: 確認して実行\nSandbox: ${sandbox || 'workspace-write'}\nFolder: ${folderSelect.value}`);
+	    if(!ok) return;
+	  }
 	  input.value = '';
 	  addBubble('user', prompt);
 	  const pending = addBubble('assistant', '実行中...');
 	  localStorage.setItem('kdeck.folder', folderSelect.value);
 	  localStorage.setItem('kdeck.model', modelInput.value);
+	  localStorage.setItem('kdeck.executionMode', executionMode);
 	  setChatState('running');
 	  const res = await fetch('?api=chat', {
 	    method:'POST',
 	    headers:{'Content-Type':'application/json'},
-	    body:JSON.stringify({prompt, thread_id:chatThread, cwd:folderSelect.value, model:modelInput.value})
+	    body:JSON.stringify({prompt, thread_id:chatThread, cwd:folderSelect.value, model:modelInput.value, execution_mode:executionMode})
 	  });
 	  let data;
 	  try{
@@ -482,7 +507,8 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
 	    if(job.status === 'running'){
 	      const elapsed = Number(job.elapsed || 0);
 	      pending.firstChild.textContent = '実行中...';
-	      runControls.status.textContent = elapsed ? `経過 ${elapsed}秒` : `確認中 ${pollCount}`;
+	      const modeLabel = job.execution_mode === 'full-access' ? 'Full access' : '確認';
+	      runControls.status.textContent = `${modeLabel} / ${job.sandbox || sandbox || ''} / ${elapsed ? `経過 ${elapsed}秒` : `確認中 ${pollCount}`}`;
 	      setTimeout(pollChat, 1500);
 	      return;
 	    }

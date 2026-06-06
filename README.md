@@ -48,6 +48,13 @@ the FastAPI server. The real `kdeck_config.php` is intentionally ignored by git.
 only on a trusted, login-protected deployment when Codex needs network access for
 operations such as `git push`.
 
+The chat UI also has an execution mode selector:
+
+- `confirm`: asks in the browser before starting Codex and runs with `workspace-write`.
+- `full-access`: runs immediately with `danger-full-access`.
+
+Set `KDECK_DEFAULT_EXECUTION_MODE=confirm` to keep the safer mode selected by default.
+
 ## API
 
 - `GET /healthz`
