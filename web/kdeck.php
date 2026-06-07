@@ -197,6 +197,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 <div class="row"><label class="muted">Local Folder</label><select id="local-cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div>
 <div class="row" id="agent-folder-row"><label class="muted">Agent Folder</label><select id="chat-cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div>
 <div class="row"><label class="muted">Model</label><input id="chat-model" value="<?=h($codex_model)?>"></div>
+<div class="row" id="remote-llm-row"><label class="muted">Remote LLM</label><select id="remote-llm-backend"></select><input id="remote-model" placeholder="model / optional"></div>
 <div class="row"><label class="muted">Execution</label><select id="execution-mode"><?php foreach ($execution_modes as $key => $mode): ?><option value="<?=h($key)?>" data-sandbox="<?=h($mode['sandbox'] ?? '')?>"<?=$key === $default_execution_mode ? ' selected' : ''?>><?=h(($mode['label'] ?? $key) . ' / ' . ($mode['sandbox'] ?? ''))?></option><?php endforeach; ?></select></div>
 	<button type="button" id="new-chat">New Chat</button>
 	<select id="history-select" class="history-select"><option value="">履歴を読み込み中...</option></select>
@@ -232,6 +233,9 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		const agentFolderRow = document.getElementById('agent-folder-row');
 		const folderSelect = document.getElementById('chat-cwd');
 		const modelInput = document.getElementById('chat-model');
+		const remoteLlmRow = document.getElementById('remote-llm-row');
+		const remoteLlmBackendSelect = document.getElementById('remote-llm-backend');
+		const remoteModelInput = document.getElementById('remote-model');
 		const executionModeSelect = document.getElementById('execution-mode');
 		const historySelect = document.getElementById('history-select');
 		const chatInput = document.getElementById('chat-input');
@@ -251,6 +255,8 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	const savedLocalFolder = localStorage.getItem('kdeck.localFolder');
 	const savedFolder = localStorage.getItem('kdeck.folder');
 	const savedModel = localStorage.getItem('kdeck.model');
+	const savedRemoteLlmBackend = localStorage.getItem('kdeck.remoteLlmBackend');
+	const savedRemoteModel = localStorage.getItem('kdeck.remoteModel');
 		const savedTargetAgent = localStorage.getItem('kdeck.targetAgent');
 		const savedExecutionMode = localStorage.getItem('kdeck.executionMode');
 		const savedThread = localStorage.getItem('kdeck.thread');
@@ -260,6 +266,9 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	}
 	if(savedModel){
 	  modelInput.value = savedModel;
+	}
+	if(savedRemoteModel){
+	  remoteModelInput.value = savedRemoteModel;
 	}
 	if(savedTargetAgent && [...targetAgentSelect.options].some(option => option.value === savedTargetAgent)){
 	  targetAgentSelect.value = savedTargetAgent;
@@ -272,6 +281,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	}
 	updateAgentRole();
 	populateAgentFolders(localStorage.getItem('kdeck.folder.' + (targetAgentSelect.value || 'local')) || savedFolder || localFolderSelect.value);
+	populateRemoteLlm(savedRemoteLlmBackend || '');
 	localFolderSelect.addEventListener('change', () => {
 	  localStorage.setItem('kdeck.localFolder', localFolderSelect.value);
 	  if((targetAgentSelect.value || 'local') === 'local'){
@@ -284,10 +294,13 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  localStorage.setItem('kdeck.folder.' + targetAgent, folderSelect.value);
 	});
 	modelInput.addEventListener('change', () => localStorage.setItem('kdeck.model', modelInput.value));
+	remoteLlmBackendSelect.addEventListener('change', () => localStorage.setItem('kdeck.remoteLlmBackend', remoteLlmBackendSelect.value));
+	remoteModelInput.addEventListener('change', () => localStorage.setItem('kdeck.remoteModel', remoteModelInput.value));
 		targetAgentSelect.addEventListener('change', () => {
 		  localStorage.setItem('kdeck.targetAgent', targetAgentSelect.value);
 		  updateAgentRole();
 		  populateAgentFolders(localStorage.getItem('kdeck.folder.' + targetAgentSelect.value) || '');
+		  populateRemoteLlm(localStorage.getItem('kdeck.remoteLlmBackend') || '');
 		});
 		executionModeSelect.addEventListener('change', () => localStorage.setItem('kdeck.executionMode', executionModeSelect.value));
 		historySelect.addEventListener('change', () => {
@@ -345,6 +358,27 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  }
 	  agentFolderRow.style.display = targetAgent === 'local' ? 'none' : '';
 	  localStorage.setItem('kdeck.folder.' + targetAgent, folderSelect.value);
+	}
+	function populateRemoteLlm(preferred = ''){
+	  const targetAgent = targetAgentSelect.value || 'local';
+	  const agent = agentMap[targetAgent] || {};
+	  const isRemote = targetAgent !== 'local';
+	  const backends = Array.isArray(agent.llm_backends) && agent.llm_backends.length ? agent.llm_backends : ['codex-cli'];
+	  const selected = preferred && backends.includes(preferred)
+	    ? preferred
+	    : (agent.default_llm_backend || backends[0] || 'codex-cli');
+	  remoteLlmBackendSelect.innerHTML = '';
+	  backends.forEach(backend => {
+	    const option = document.createElement('option');
+	    option.value = backend;
+	    option.textContent = backend;
+	    remoteLlmBackendSelect.appendChild(option);
+	  });
+	  remoteLlmBackendSelect.value = selected;
+	  if(!remoteModelInput.value || !isRemote){
+	    remoteModelInput.value = isRemote ? (agent.default_model || modelInput.value || '') : '';
+	  }
+	  remoteLlmRow.style.display = isRemote ? '' : 'none';
 	}
 	function updateAgentRole(){
 	  const selected = targetAgentSelect.selectedOptions[0];
@@ -420,6 +454,10 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	    modelInput.value = thread.model;
 	    localStorage.setItem('kdeck.model', thread.model);
 	  }
+	  if(thread.remote_model){
+	    remoteModelInput.value = thread.remote_model;
+	    localStorage.setItem('kdeck.remoteModel', thread.remote_model);
+	  }
 		  if(thread.execution_mode && [...executionModeSelect.options].some(option => option.value === thread.execution_mode)){
 		    executionModeSelect.value = thread.execution_mode;
 		    localStorage.setItem('kdeck.executionMode', thread.execution_mode);
@@ -430,6 +468,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		    updateAgentRole();
 		  }
 		  populateAgentFolders(thread.cwd || localStorage.getItem('kdeck.folder.' + (targetAgentSelect.value || 'local')) || '');
+		  populateRemoteLlm(thread.remote_llm_backend || localStorage.getItem('kdeck.remoteLlmBackend') || '');
 	  if(thread.cwd && [...folderSelect.options].some(option => option.value === thread.cwd)){
 	    folderSelect.value = thread.cwd;
 	    localStorage.setItem('kdeck.folder', thread.cwd);
@@ -581,8 +620,11 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  const executionMode = executionModeSelect.value || 'confirm';
 	  const sandbox = executionModeSelect.selectedOptions[0]?.dataset?.sandbox || '';
 	  const targetAgent = targetAgentSelect.value || 'local';
+	  const remoteLlmText = targetAgent === 'local'
+	    ? ''
+	    : `\nRemote LLM: ${remoteLlmBackendSelect.value || 'codex-cli'} / ${remoteModelInput.value || modelInput.value || ''}`;
 	  if(executionMode === 'confirm'){
-	    const ok = window.confirm(`この指示を実行しますか？\n\nAgent: ${targetAgent}\nMode: 確認して実行\nSandbox: ${sandbox || 'workspace-write'}\nLocal Folder: ${localFolderSelect.value}\nAgent Folder: ${folderSelect.value}`);
+	    const ok = window.confirm(`この指示を実行しますか？\n\nAgent: ${targetAgent}\nMode: 確認して実行\nSandbox: ${sandbox || 'workspace-write'}\nLocal Folder: ${localFolderSelect.value}\nAgent Folder: ${folderSelect.value}${remoteLlmText}`);
 	    if(!ok) return;
 	  }
 	  input.value = '';
@@ -592,13 +634,15 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  localStorage.setItem('kdeck.localFolder', localFolderSelect.value);
 	  localStorage.setItem('kdeck.folder.' + targetAgent, folderSelect.value);
 	  localStorage.setItem('kdeck.model', modelInput.value);
+	  localStorage.setItem('kdeck.remoteLlmBackend', remoteLlmBackendSelect.value);
+	  localStorage.setItem('kdeck.remoteModel', remoteModelInput.value);
 	  localStorage.setItem('kdeck.targetAgent', targetAgent);
 	  localStorage.setItem('kdeck.executionMode', executionMode);
 	  setChatState('running');
 	  const res = await fetch('?api=chat', {
 	    method:'POST',
 	    headers:{'Content-Type':'application/json'},
-	    body:JSON.stringify({prompt, thread_id:chatThread, cwd:folderSelect.value, local_cwd:localFolderSelect.value, model:modelInput.value, execution_mode:executionMode, target_agent:targetAgent})
+	    body:JSON.stringify({prompt, thread_id:chatThread, cwd:folderSelect.value, local_cwd:localFolderSelect.value, model:modelInput.value, remote_llm_backend:remoteLlmBackendSelect.value, remote_model:remoteModelInput.value, execution_mode:executionMode, target_agent:targetAgent})
 	  });
 	  let data;
 	  try{

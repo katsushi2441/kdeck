@@ -100,6 +100,8 @@ class ChatRequest(BaseModel):
     local_cwd: str = "/home/kojima/work/kdeck"
     thread_id: str = ""
     model: str = ""
+    remote_llm_backend: str = ""
+    remote_model: str = ""
     execution_mode: str = DEFAULT_EXECUTION_MODE
     target_agent: str = "local"
 
@@ -219,6 +221,9 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "allowed_roots": [],
         "folder_base": "/home/kojima/work",
         "project_folders": [],
+        "llm_backends": ["codex-cli"],
+        "default_llm_backend": "codex-cli",
+        "default_model": CODEX_MODEL,
     },
     {
         "id": "hermes-192-168-0-2",
@@ -229,6 +234,9 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "gateway_id": "openclaw-192-168-0-2",
         "folder_base": "/home/kojima/exdirect",
         "project_folders": project_folders_under("/home/kojima/exdirect"),
+        "llm_backends": ["codex-cli", "claude-cli", "ollama"],
+        "default_llm_backend": "codex-cli",
+        "default_model": CODEX_MODEL,
     },
     {
         "id": "aixec-api-192-168-0-14",
@@ -247,6 +255,9 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
             "kurage",
             "kdeck",
         ]),
+        "llm_backends": ["codex-cli", "claude-cli", "ollama"],
+        "default_llm_backend": "codex-cli",
+        "default_model": CODEX_MODEL,
     },
     {
         "id": "hyperframes-192-168-0-11",
@@ -264,6 +275,9 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
             "aixec",
             "url2ai",
         ]),
+        "llm_backends": ["codex-cli", "claude-cli", "ollama"],
+        "default_llm_backend": "codex-cli",
+        "default_model": CODEX_MODEL,
     },
 ]
 
@@ -298,6 +312,13 @@ def load_agents() -> list[dict[str, Any]]:
                 for p in item.get("project_folders", [])
                 if str(p).strip()
             ] if isinstance(item.get("project_folders"), list) else [],
+            "llm_backends": [
+                str(p).strip()
+                for p in item.get("llm_backends", [])
+                if str(p).strip()
+            ] if isinstance(item.get("llm_backends"), list) else ["codex-cli", "claude-cli", "ollama"],
+            "default_llm_backend": str(item.get("default_llm_backend") or "codex-cli"),
+            "default_model": str(item.get("default_model") or CODEX_MODEL),
             "allowed_roots": [
                 str(p).strip()
                 for p in item.get("allowed_roots", [])
@@ -414,6 +435,9 @@ def agent_public(agent: dict[str, Any]) -> dict[str, Any]:
         "folder_base": folder_base,
         "project_folders": project_folders,
         "allowed_roots": allowed_roots,
+        "llm_backends": agent.get("llm_backends") or ["codex-cli"],
+        "default_llm_backend": agent.get("default_llm_backend") or "codex-cli",
+        "default_model": agent.get("default_model") or CODEX_MODEL,
         "configured": bool(kind == "local" or (gateway_id and gateway_id in swarmclaw_gateway_ids())),
     }
 
@@ -482,6 +506,8 @@ def load_thread(thread_id: str) -> list[dict[str, str]]:
             "cwd": str(payload.get("cwd") or ""),
             "local_cwd": str(payload.get("local_cwd") or ""),
             "model": str(payload.get("model") or ""),
+            "remote_llm_backend": str(payload.get("remote_llm_backend") or ""),
+            "remote_model": str(payload.get("remote_model") or ""),
             "execution_mode": str(payload.get("execution_mode") or DEFAULT_EXECUTION_MODE),
             "target_agent": str(payload.get("target_agent") or "local"),
             "created": int(payload.get("created") or 0),
@@ -492,7 +518,7 @@ def load_thread(thread_id: str) -> list[dict[str, str]]:
     return CHAT_THREADS[thread_id]
 
 
-def save_thread(thread_id: str, cwd: str, model: str, target_agent: str = "local", local_cwd: str = "") -> None:
+def save_thread(thread_id: str, cwd: str, model: str, target_agent: str = "local", local_cwd: str = "", remote_llm_backend: str = "", remote_model: str = "") -> None:
     thread_id = safe_thread_id(thread_id)
     if not thread_id:
         return
@@ -507,6 +533,8 @@ def save_thread(thread_id: str, cwd: str, model: str, target_agent: str = "local
         "cwd": cwd,
         "local_cwd": local_cwd or str(meta.get("local_cwd") or ""),
         "model": model,
+        "remote_llm_backend": remote_llm_backend or str(meta.get("remote_llm_backend") or ""),
+        "remote_model": remote_model or str(meta.get("remote_model") or ""),
         "execution_mode": str(meta.get("execution_mode") or DEFAULT_EXECUTION_MODE),
         "target_agent": target_agent,
         "created": created,
@@ -514,7 +542,7 @@ def save_thread(thread_id: str, cwd: str, model: str, target_agent: str = "local
         "messages": messages[-CHAT_SAVE_MESSAGE_LIMIT:],
     }
     thread_path(thread_id).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    CHAT_META[thread_id] = {k: payload[k] for k in ("id", "title", "cwd", "local_cwd", "model", "execution_mode", "target_agent", "created", "updated")}
+    CHAT_META[thread_id] = {k: payload[k] for k in ("id", "title", "cwd", "local_cwd", "model", "remote_llm_backend", "remote_model", "execution_mode", "target_agent", "created", "updated")}
 
 
 def list_chat_threads() -> list[dict[str, Any]]:
@@ -530,6 +558,8 @@ def list_chat_threads() -> list[dict[str, Any]]:
                 "cwd": str(payload.get("cwd") or ""),
                 "local_cwd": str(payload.get("local_cwd") or ""),
                 "model": str(payload.get("model") or ""),
+                "remote_llm_backend": str(payload.get("remote_llm_backend") or ""),
+                "remote_model": str(payload.get("remote_model") or ""),
                 "execution_mode": str(payload.get("execution_mode") or DEFAULT_EXECUTION_MODE),
                 "target_agent": str(payload.get("target_agent") or "local"),
                 "created": int(payload.get("created") or 0),
@@ -761,6 +791,8 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", executi
 
 def run_remote_agent(agent: dict[str, Any], req: ChatRequest, thread_id: str, job_id: str) -> dict[str, Any]:
     gateway_id = str(agent.get("gateway_id") or "").strip()
+    remote_llm_backend = req.remote_llm_backend.strip() or str(agent.get("default_llm_backend") or "codex-cli")
+    remote_model = req.remote_model.strip() or req.model.strip() or str(agent.get("default_model") or CODEX_MODEL)
     if not gateway_id:
         return {
             "returncode": 2,
@@ -780,6 +812,8 @@ def run_remote_agent(agent: dict[str, Any], req: ChatRequest, thread_id: str, jo
             "control_plane": "swarmclaw",
             "base_url": SWARMCLAW_BASE_URL,
             "gateway_id": gateway_id,
+            "llm_backend": remote_llm_backend,
+            "model": remote_model,
         },
     }
 
@@ -790,6 +824,8 @@ def chat(req: ChatRequest) -> dict[str, Any]:
     agent = get_agent(target_agent)
     cwd = validate_cwd(req.cwd) if agent.get("kind") == "local" else Path(req.cwd).expanduser()
     model = req.model.strip() or CODEX_MODEL
+    remote_llm_backend = req.remote_llm_backend.strip()
+    remote_model = req.remote_model.strip()
     execution_mode = normalize_execution_mode(req.execution_mode)
     sandbox = CODEX_EXECUTION_MODES[execution_mode]["sandbox"]
     thread_id = safe_thread_id(req.thread_id) or f"chat-{uuid.uuid4().hex[:8]}"
@@ -800,6 +836,8 @@ def chat(req: ChatRequest) -> dict[str, Any]:
         "thread_id": thread_id,
         "status": "running",
         "model": model,
+        "remote_llm_backend": remote_llm_backend,
+        "remote_model": remote_model,
         "execution_mode": execution_mode,
         "sandbox": sandbox,
         "target_agent": target_agent,
@@ -814,7 +852,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
 
     def worker() -> None:
         try:
-            result = run_chat_turn(cwd, model, thread_id, req.prompt, job_id, execution_mode, target_agent, req.local_cwd)
+            result = run_chat_turn(cwd, model, thread_id, req.prompt, job_id, execution_mode, target_agent, req.local_cwd, remote_llm_backend, remote_model)
             CHAT_JOBS[job_id].update(result)
             CHAT_JOBS[job_id]["status"] = "finished"
             CHAT_JOBS[job_id]["finished"] = int(time.time())
@@ -834,7 +872,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
     return CHAT_JOBS[job_id]
 
 
-def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE, target_agent: str = "local", local_cwd: str = "") -> dict[str, Any]:
+def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE, target_agent: str = "local", local_cwd: str = "", remote_llm_backend: str = "", remote_model: str = "") -> dict[str, Any]:
     execution_mode = normalize_execution_mode(execution_mode)
     sandbox = CODEX_EXECUTION_MODES[execution_mode]["sandbox"]
     target_agent = safe_agent_id(target_agent)
@@ -860,7 +898,9 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
     CHAT_META.setdefault(thread_id, {})["target_agent"] = target_agent
     CHAT_META.setdefault(thread_id, {})["local_cwd"] = local_cwd
     CHAT_META[thread_id]["local_cwd"] = local_cwd
-    save_thread(thread_id, str(cwd), model, target_agent, local_cwd)
+    CHAT_META[thread_id]["remote_llm_backend"] = remote_llm_backend
+    CHAT_META[thread_id]["remote_model"] = remote_model
+    save_thread(thread_id, str(cwd), model, target_agent, local_cwd, remote_llm_backend, remote_model)
     if agent.get("kind") == "local":
         result = run_codex_exec(cwd, model, prompt, job_id, execution_mode)
     else:
@@ -870,17 +910,21 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
             local_cwd=local_cwd,
             thread_id=thread_id,
             model=model,
+            remote_llm_backend=remote_llm_backend,
+            remote_model=remote_model,
             execution_mode=execution_mode,
             target_agent=target_agent,
         )
         result = run_remote_agent(agent, remote_req, thread_id, job_id)
     assistant_text = result["text"] or "(no response)"
     history.append({"role": "assistant", "content": assistant_text})
-    save_thread(thread_id, str(cwd), model, target_agent, local_cwd)
+    save_thread(thread_id, str(cwd), model, target_agent, local_cwd, remote_llm_backend, remote_model)
     return {
         "ok": result["returncode"] == 0,
         "thread_id": thread_id,
         "model": model,
+        "remote_llm_backend": remote_llm_backend,
+        "remote_model": remote_model,
         "execution_mode": execution_mode,
         "sandbox": sandbox,
         "target_agent": target_agent,
@@ -943,6 +987,8 @@ def chat_thread(thread_id: str) -> dict[str, Any]:
             "cwd": meta.get("cwd") or "",
             "local_cwd": meta.get("local_cwd") or "",
             "model": meta.get("model") or "",
+            "remote_llm_backend": meta.get("remote_llm_backend") or "",
+            "remote_model": meta.get("remote_model") or "",
             "execution_mode": meta.get("execution_mode") or DEFAULT_EXECUTION_MODE,
             "target_agent": meta.get("target_agent") or "local",
             "created": meta.get("created") or 0,
