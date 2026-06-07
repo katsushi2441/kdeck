@@ -672,6 +672,20 @@ def save_agent_task(task: dict[str, Any]) -> None:
     task_path(task_id).write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def load_agent_task(task_id: str) -> dict[str, Any] | None:
+    task_id = safe_task_id(task_id)
+    if not task_id:
+        return None
+    path = task_path(task_id)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def summarize_for_memory(text: str, limit: int = 1200) -> str:
     text = re.sub(r"\s+", " ", text or "").strip()
     if len(text) <= limit:
@@ -1407,7 +1421,16 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
 def chat_job(job_id: str) -> dict[str, Any]:
     job = CHAT_JOBS.get(job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail="chat job not found")
+        job = load_agent_task(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="chat job not found")
+        if job.get("status") == "running":
+            job["status"] = "interrupted"
+            job["error"] = "API restart interrupted this chat job. Please send the request again."
+            job["message"] = "API再起動により、このチャット実行は中断されました。もう一度送信してください。"
+            job["finished"] = int(time.time())
+            save_agent_task(job)
+        CHAT_JOBS[job_id] = job
     if job.get("status") == "running":
         job["elapsed"] = int(time.time()) - int(job.get("created") or time.time())
     return job
