@@ -78,6 +78,7 @@ class SendRequest(BaseModel):
 class ChatRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000)
     cwd: str = "/home/kojima/work/url2ai"
+    local_cwd: str = "/home/kojima/work/kdeck"
     thread_id: str = ""
     model: str = ""
     execution_mode: str = DEFAULT_EXECUTION_MODE
@@ -196,6 +197,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "host": "192.168.0.3",
         "kind": "local",
         "gateway_id": "",
+        "allowed_roots": [],
     },
     {
         "id": "hermes-192-168-0-2",
@@ -204,6 +206,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "host": "192.168.0.2",
         "kind": "swarmclaw",
         "gateway_id": "openclaw-192-168-0-2",
+        "allowed_roots": ["/home/kojima/exdirect", "/home/kojima/work", "/home/kojima"],
     },
     {
         "id": "aixec-api-192-168-0-14",
@@ -212,6 +215,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "host": "192.168.0.14",
         "kind": "swarmclaw",
         "gateway_id": "openclaw-192-168-0-14",
+        "allowed_roots": ["/home/kojima/work", "/home/kojima/exdirect", "/home/kojima"],
     },
     {
         "id": "hyperframes-192-168-0-11",
@@ -220,6 +224,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "host": "192.168.0.11",
         "kind": "swarmclaw",
         "gateway_id": "openclaw-192-168-0-11",
+        "allowed_roots": ["/home/kojima/work", "/home/kojima/exdirect", "/home/kojima"],
     },
 ]
 
@@ -248,6 +253,11 @@ def load_agents() -> list[dict[str, Any]]:
             "host": str(item.get("host") or ""),
             "kind": str(item.get("kind") or "swarmclaw"),
             "gateway_id": str(item.get("gateway_id") or ""),
+            "allowed_roots": [
+                str(p).strip()
+                for p in item.get("allowed_roots", [])
+                if str(p).strip()
+            ] if isinstance(item.get("allowed_roots"), list) else [],
         })
     return agents or DEFAULT_AGENTS
 
@@ -340,6 +350,11 @@ def swarmclaw_gateway_ids() -> set[str]:
 def agent_public(agent: dict[str, Any]) -> dict[str, Any]:
     kind = agent.get("kind") or ""
     gateway_id = str(agent.get("gateway_id") or "")
+    allowed_roots = [str(p) for p in ALLOWED_ROOTS] if kind == "local" else [
+        str(p)
+        for p in agent.get("allowed_roots", [])
+        if str(p).strip()
+    ]
     return {
         "id": agent.get("id") or "",
         "label": agent.get("label") or agent.get("id") or "",
@@ -347,6 +362,7 @@ def agent_public(agent: dict[str, Any]) -> dict[str, Any]:
         "host": agent.get("host") or "",
         "kind": kind,
         "gateway_id": gateway_id,
+        "allowed_roots": allowed_roots,
         "configured": bool(kind == "local" or (gateway_id and gateway_id in swarmclaw_gateway_ids())),
     }
 
@@ -413,6 +429,7 @@ def load_thread(thread_id: str) -> list[dict[str, str]]:
             "id": thread_id,
             "title": str(payload.get("title") or thread_title(clean_messages)),
             "cwd": str(payload.get("cwd") or ""),
+            "local_cwd": str(payload.get("local_cwd") or ""),
             "model": str(payload.get("model") or ""),
             "execution_mode": str(payload.get("execution_mode") or DEFAULT_EXECUTION_MODE),
             "target_agent": str(payload.get("target_agent") or "local"),
@@ -424,7 +441,7 @@ def load_thread(thread_id: str) -> list[dict[str, str]]:
     return CHAT_THREADS[thread_id]
 
 
-def save_thread(thread_id: str, cwd: str, model: str, target_agent: str = "local") -> None:
+def save_thread(thread_id: str, cwd: str, model: str, target_agent: str = "local", local_cwd: str = "") -> None:
     thread_id = safe_thread_id(thread_id)
     if not thread_id:
         return
@@ -437,6 +454,7 @@ def save_thread(thread_id: str, cwd: str, model: str, target_agent: str = "local
         "id": thread_id,
         "title": thread_title(messages),
         "cwd": cwd,
+        "local_cwd": local_cwd or str(meta.get("local_cwd") or ""),
         "model": model,
         "execution_mode": str(meta.get("execution_mode") or DEFAULT_EXECUTION_MODE),
         "target_agent": target_agent,
@@ -445,7 +463,7 @@ def save_thread(thread_id: str, cwd: str, model: str, target_agent: str = "local
         "messages": messages[-CHAT_SAVE_MESSAGE_LIMIT:],
     }
     thread_path(thread_id).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    CHAT_META[thread_id] = {k: payload[k] for k in ("id", "title", "cwd", "model", "execution_mode", "target_agent", "created", "updated")}
+    CHAT_META[thread_id] = {k: payload[k] for k in ("id", "title", "cwd", "local_cwd", "model", "execution_mode", "target_agent", "created", "updated")}
 
 
 def list_chat_threads() -> list[dict[str, Any]]:
@@ -459,6 +477,7 @@ def list_chat_threads() -> list[dict[str, Any]]:
                 "id": str(payload.get("id") or path.stem),
                 "title": str(payload.get("title") or thread_title(messages)),
                 "cwd": str(payload.get("cwd") or ""),
+                "local_cwd": str(payload.get("local_cwd") or ""),
                 "model": str(payload.get("model") or ""),
                 "execution_mode": str(payload.get("execution_mode") or DEFAULT_EXECUTION_MODE),
                 "target_agent": str(payload.get("target_agent") or "local"),
@@ -735,6 +754,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
         "target_agent": target_agent,
         "agent_role": agent.get("role") or "",
         "cwd": str(cwd),
+        "local_cwd": req.local_cwd,
         "message": "",
         "error": "",
         "created": int(time.time()),
@@ -743,7 +763,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
 
     def worker() -> None:
         try:
-            result = run_chat_turn(cwd, model, thread_id, req.prompt, job_id, execution_mode, target_agent)
+            result = run_chat_turn(cwd, model, thread_id, req.prompt, job_id, execution_mode, target_agent, req.local_cwd)
             CHAT_JOBS[job_id].update(result)
             CHAT_JOBS[job_id]["status"] = "finished"
             CHAT_JOBS[job_id]["finished"] = int(time.time())
@@ -763,7 +783,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
     return CHAT_JOBS[job_id]
 
 
-def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE, target_agent: str = "local") -> dict[str, Any]:
+def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE, target_agent: str = "local", local_cwd: str = "") -> dict[str, Any]:
     execution_mode = normalize_execution_mode(execution_mode)
     sandbox = CODEX_EXECUTION_MODES[execution_mode]["sandbox"]
     target_agent = safe_agent_id(target_agent)
@@ -787,13 +807,16 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
     history.append({"role": "user", "content": user_prompt})
     CHAT_META.setdefault(thread_id, {})["execution_mode"] = execution_mode
     CHAT_META.setdefault(thread_id, {})["target_agent"] = target_agent
-    save_thread(thread_id, str(cwd), model, target_agent)
+    CHAT_META.setdefault(thread_id, {})["local_cwd"] = local_cwd
+    CHAT_META[thread_id]["local_cwd"] = local_cwd
+    save_thread(thread_id, str(cwd), model, target_agent, local_cwd)
     if agent.get("kind") == "local":
         result = run_codex_exec(cwd, model, prompt, job_id, execution_mode)
     else:
         remote_req = ChatRequest(
             prompt=prompt,
             cwd=str(cwd),
+            local_cwd=local_cwd,
             thread_id=thread_id,
             model=model,
             execution_mode=execution_mode,
@@ -802,7 +825,7 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         result = run_remote_agent(agent, remote_req, thread_id, job_id)
     assistant_text = result["text"] or "(no response)"
     history.append({"role": "assistant", "content": assistant_text})
-    save_thread(thread_id, str(cwd), model, target_agent)
+    save_thread(thread_id, str(cwd), model, target_agent, local_cwd)
     return {
         "ok": result["returncode"] == 0,
         "thread_id": thread_id,
@@ -812,6 +835,7 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         "target_agent": target_agent,
         "agent_role": agent.get("role") or "",
         "cwd": str(cwd),
+        "local_cwd": local_cwd,
         "message": assistant_text,
         "stderr_tail": result["stderr_tail"],
         "remote_job": result.get("remote_job") or {},
@@ -866,6 +890,7 @@ def chat_thread(thread_id: str) -> dict[str, Any]:
             "id": thread_id,
             "title": meta.get("title") or thread_title(messages),
             "cwd": meta.get("cwd") or "",
+            "local_cwd": meta.get("local_cwd") or "",
             "model": meta.get("model") or "",
             "execution_mode": meta.get("execution_mode") or DEFAULT_EXECUTION_MODE,
             "target_agent": meta.get("target_agent") or "local",

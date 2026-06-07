@@ -194,7 +194,8 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 </style></head><body><header><div class="bar"><div class="brand"><img class="brand-icon" src="/images/kurage-icon.png" alt="Kurage"><span class="brand-title"><b>Kurage Agent Deck</b><span>Codex CLI web console</span></span></div><div class="muted account">@<?=h($session_user)?> · <a class="logout" href="<?=h($logout_url)?>">Logout</a></div></div></header>
 <div class="wrap"><aside class="panel side"><div class="side-top"><h2>Chat</h2>
 <div class="row"><label class="muted">Agent</label><select id="target-agent"><?php foreach ($agents as $agent): ?><option value="<?=h($agent['id'] ?? '')?>" data-role="<?=h($agent['role'] ?? '')?>" data-host="<?=h($agent['host'] ?? '')?>" data-configured="<?=!empty($agent['configured']) ? '1' : '0'?>"><?=h(($agent['label'] ?? $agent['id'] ?? 'agent') . ' / ' . ($agent['host'] ?? ''))?></option><?php endforeach; ?></select><span id="agent-role" class="muted"></span></div>
-<div class="row"><label class="muted">Folder</label><select id="chat-cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div>
+<div class="row"><label class="muted">Local Folder</label><select id="local-cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div>
+<div class="row" id="agent-folder-row"><label class="muted">Agent Folder</label><select id="chat-cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div>
 <div class="row"><label class="muted">Model</label><input id="chat-model" value="<?=h($codex_model)?>"></div>
 <div class="row"><label class="muted">Execution</label><select id="execution-mode"><?php foreach ($execution_modes as $key => $mode): ?><option value="<?=h($key)?>" data-sandbox="<?=h($mode['sandbox'] ?? '')?>"<?=$key === $default_execution_mode ? ' selected' : ''?>><?=h(($mode['label'] ?? $key) . ' / ' . ($mode['sandbox'] ?? ''))?></option><?php endforeach; ?></select></div>
 	<button type="button" id="new-chat">New Chat</button>
@@ -202,7 +203,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	<div class="muted" style="margin-top:8px">履歴はサーバに保存されます。</div></div>
 <div id="history" class="history"><div class="empty-history">履歴を選択するとここに情報を表示します。</div></div>
 </aside>
-	<main class="panel main"><div class="main-head"><h2 id="chat-title">Codex Chat</h2><span class="muted" id="chat-state">ready</span></div><div id="chatlog" class="chatlog"><div class="bubble assistant">フォルダを選んで、下の入力欄からCodexに指示できます。コマンド実行も会話の中で依頼してください。</div></div>
+	<main class="panel main"><div class="main-head"><h2 id="chat-title">Conversation</h2><span class="muted" id="chat-state">ready</span></div><div id="chatlog" class="chatlog"><div class="bubble assistant">フォルダを選んで、下の入力欄からCodexに指示できます。コマンド実行も会話の中で依頼してください。</div></div>
 	<div class="voicebar">
 	  <button type="button" id="voice-input" class="secondary">🎙 Speak</button>
 	  <button type="button" id="voice-stop" class="secondary">読み上げ停止</button>
@@ -218,12 +219,17 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 <script>
 		let chatThread = '';
 		let historyThreads = [];
+		const localRoots = <?=json_encode(array_values($roots), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)?>;
+		const agents = <?=json_encode(array_values($agents), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)?>;
+		const agentMap = Object.fromEntries(agents.map(agent => [agent.id || '', agent]));
 		const chatlog = document.getElementById('chatlog');
 		const historyList = document.getElementById('history');
 		const chatTitle = document.getElementById('chat-title');
 		const chatState = document.getElementById('chat-state');
 		const targetAgentSelect = document.getElementById('target-agent');
 		const agentRole = document.getElementById('agent-role');
+		const localFolderSelect = document.getElementById('local-cwd');
+		const agentFolderRow = document.getElementById('agent-folder-row');
 		const folderSelect = document.getElementById('chat-cwd');
 		const modelInput = document.getElementById('chat-model');
 		const executionModeSelect = document.getElementById('execution-mode');
@@ -242,14 +248,15 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	let recognition = null;
 	let recognizing = false;
 	let submitAfterVoice = false;
+	const savedLocalFolder = localStorage.getItem('kdeck.localFolder');
 	const savedFolder = localStorage.getItem('kdeck.folder');
 	const savedModel = localStorage.getItem('kdeck.model');
 		const savedTargetAgent = localStorage.getItem('kdeck.targetAgent');
 		const savedExecutionMode = localStorage.getItem('kdeck.executionMode');
 		const savedThread = localStorage.getItem('kdeck.thread');
 		const savedMemo = localStorage.getItem('kdeck.voiceMemo');
-	if(savedFolder && [...folderSelect.options].some(option => option.value === savedFolder)){
-	  folderSelect.value = savedFolder;
+	if(savedLocalFolder && [...localFolderSelect.options].some(option => option.value === savedLocalFolder)){
+	  localFolderSelect.value = savedLocalFolder;
 	}
 	if(savedModel){
 	  modelInput.value = savedModel;
@@ -263,11 +270,24 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	if(savedMemo){
 	  voiceMemo.value = savedMemo;
 	}
-	folderSelect.addEventListener('change', () => localStorage.setItem('kdeck.folder', folderSelect.value));
+	updateAgentRole();
+	populateAgentFolders(localStorage.getItem('kdeck.folder.' + (targetAgentSelect.value || 'local')) || savedFolder || localFolderSelect.value);
+	localFolderSelect.addEventListener('change', () => {
+	  localStorage.setItem('kdeck.localFolder', localFolderSelect.value);
+	  if((targetAgentSelect.value || 'local') === 'local'){
+	    populateAgentFolders(localFolderSelect.value);
+	  }
+	});
+	folderSelect.addEventListener('change', () => {
+	  const targetAgent = targetAgentSelect.value || 'local';
+	  localStorage.setItem('kdeck.folder', folderSelect.value);
+	  localStorage.setItem('kdeck.folder.' + targetAgent, folderSelect.value);
+	});
 	modelInput.addEventListener('change', () => localStorage.setItem('kdeck.model', modelInput.value));
 		targetAgentSelect.addEventListener('change', () => {
 		  localStorage.setItem('kdeck.targetAgent', targetAgentSelect.value);
 		  updateAgentRole();
+		  populateAgentFolders(localStorage.getItem('kdeck.folder.' + targetAgentSelect.value) || '');
 		});
 		executionModeSelect.addEventListener('change', () => localStorage.setItem('kdeck.executionMode', executionModeSelect.value));
 		historySelect.addEventListener('change', () => {
@@ -276,7 +296,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		  } else {
 		    chatThread = '';
 		    localStorage.removeItem('kdeck.thread');
-		    chatTitle.textContent = 'Codex Chat';
+		    chatTitle.textContent = 'Conversation';
 		    chatlog.innerHTML = '';
 		    addBubble('assistant', '会話履歴を選択すると本文を表示します。');
 		    renderHistory();
@@ -301,6 +321,29 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  return d.toLocaleString('ja-JP', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'});
 	}
 	function setChatState(text){ chatState.textContent = text || 'ready'; }
+	function agentRoots(agentId){
+	  const agent = agentMap[agentId] || {};
+	  const roots = Array.isArray(agent.allowed_roots) && agent.allowed_roots.length ? agent.allowed_roots : localRoots;
+	  return roots.filter(Boolean);
+	}
+	function populateAgentFolders(preferred = ''){
+	  const targetAgent = targetAgentSelect.value || 'local';
+	  const roots = targetAgent === 'local' ? localRoots : agentRoots(targetAgent);
+	  const fallback = targetAgent === 'local' ? localFolderSelect.value : roots[0] || localFolderSelect.value;
+	  const selected = preferred && roots.includes(preferred) ? preferred : fallback;
+	  folderSelect.innerHTML = '';
+	  roots.forEach(root => {
+	    const option = document.createElement('option');
+	    option.value = root;
+	    option.textContent = root;
+	    folderSelect.appendChild(option);
+	  });
+	  if(selected && roots.includes(selected)){
+	    folderSelect.value = selected;
+	  }
+	  agentFolderRow.style.display = targetAgent === 'local' ? 'none' : '';
+	  localStorage.setItem('kdeck.folder.' + targetAgent, folderSelect.value);
+	}
 	function updateAgentRole(){
 	  const selected = targetAgentSelect.selectedOptions[0];
 	  const role = selected?.dataset?.role || '';
@@ -333,14 +376,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		    historyList.innerHTML = '<div class="empty-history">まだ保存されたチャットはありません。</div>';
 		    return;
 		  }
-		  const selected = threads.find(thread => thread.id === chatThread);
-		  if(selected){
-		    historyList.innerHTML = '<div class="history-item active"><span class="history-title"></span><span class="history-meta"></span></div>';
-		    historyList.querySelector('.history-title').textContent = selected.title || 'Untitled chat';
-		    historyList.querySelector('.history-meta').textContent = [fmtTime(selected.updated), selected.target_agent || 'local', selected.cwd || '', selected.model || ''].filter(Boolean).join(' · ');
-		  } else {
-		    historyList.innerHTML = '<div class="empty-history">上のリストボックスから履歴を選ぶと、右側に本文を表示します。</div>';
-		  }
+		  historyList.innerHTML = chatThread ? '' : '<div class="empty-history">上のリストボックスから履歴を選ぶと、右側に本文を表示します。</div>';
 		  setActiveHistory();
 		}
 		async function loadHistory(options = {}){
@@ -373,11 +409,11 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 			    const thread = data.thread;
 			    chatThread = thread.id;
 			    localStorage.setItem('kdeck.thread', chatThread);
-			    chatTitle.textContent = thread.title || 'Codex Chat';
-	  if(thread.cwd && [...folderSelect.options].some(option => option.value === thread.cwd)){
-	    folderSelect.value = thread.cwd;
-	    localStorage.setItem('kdeck.folder', thread.cwd);
-	  }
+		    chatTitle.textContent = 'Conversation';
+		  if(thread.local_cwd && [...localFolderSelect.options].some(option => option.value === thread.local_cwd)){
+		    localFolderSelect.value = thread.local_cwd;
+		    localStorage.setItem('kdeck.localFolder', thread.local_cwd);
+		  }
 	  if(thread.model){
 	    modelInput.value = thread.model;
 	    localStorage.setItem('kdeck.model', thread.model);
@@ -391,6 +427,12 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		    localStorage.setItem('kdeck.targetAgent', thread.target_agent);
 		    updateAgentRole();
 		  }
+		  populateAgentFolders(thread.cwd || localStorage.getItem('kdeck.folder.' + (targetAgentSelect.value || 'local')) || '');
+	  if(thread.cwd && [...folderSelect.options].some(option => option.value === thread.cwd)){
+	    folderSelect.value = thread.cwd;
+	    localStorage.setItem('kdeck.folder', thread.cwd);
+	    localStorage.setItem('kdeck.folder.' + (targetAgentSelect.value || 'local'), thread.cwd);
+	  }
 	  chatlog.innerHTML = '';
 	  (thread.messages || []).forEach(message => addBubble(message.role === 'user' ? 'user' : 'assistant', message.content || ''));
 		  if(!(thread.messages || []).length) addBubble('assistant', '履歴は空です。');
@@ -522,7 +564,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	document.getElementById('new-chat').addEventListener('click', () => {
 		  chatThread = '';
 		  localStorage.removeItem('kdeck.thread');
-		  chatTitle.textContent = 'Codex Chat';
+		  chatTitle.textContent = 'Conversation';
 	  chatlog.innerHTML = '';
 	  if(canSpeak) window.speechSynthesis.cancel();
 		  addBubble('assistant', '新しいチャットを開始しました。');
@@ -538,13 +580,15 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  const sandbox = executionModeSelect.selectedOptions[0]?.dataset?.sandbox || '';
 	  const targetAgent = targetAgentSelect.value || 'local';
 	  if(executionMode === 'confirm'){
-	    const ok = window.confirm(`この指示を実行しますか？\n\nAgent: ${targetAgent}\nMode: 確認して実行\nSandbox: ${sandbox || 'workspace-write'}\nFolder: ${folderSelect.value}`);
+	    const ok = window.confirm(`この指示を実行しますか？\n\nAgent: ${targetAgent}\nMode: 確認して実行\nSandbox: ${sandbox || 'workspace-write'}\nLocal Folder: ${localFolderSelect.value}\nAgent Folder: ${folderSelect.value}`);
 	    if(!ok) return;
 	  }
 	  input.value = '';
 	  addBubble('user', prompt);
 	  const pending = addBubble('assistant', '実行中...');
 	  localStorage.setItem('kdeck.folder', folderSelect.value);
+	  localStorage.setItem('kdeck.localFolder', localFolderSelect.value);
+	  localStorage.setItem('kdeck.folder.' + targetAgent, folderSelect.value);
 	  localStorage.setItem('kdeck.model', modelInput.value);
 	  localStorage.setItem('kdeck.targetAgent', targetAgent);
 	  localStorage.setItem('kdeck.executionMode', executionMode);
@@ -552,7 +596,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  const res = await fetch('?api=chat', {
 	    method:'POST',
 	    headers:{'Content-Type':'application/json'},
-	    body:JSON.stringify({prompt, thread_id:chatThread, cwd:folderSelect.value, model:modelInput.value, execution_mode:executionMode, target_agent:targetAgent})
+	    body:JSON.stringify({prompt, thread_id:chatThread, cwd:folderSelect.value, local_cwd:localFolderSelect.value, model:modelInput.value, execution_mode:executionMode, target_agent:targetAgent})
 	  });
 	  let data;
 	  try{
