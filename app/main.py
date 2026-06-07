@@ -263,10 +263,13 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "gateway_id": "openclaw-192-168-0-2",
         "folder_base": "/home/kojima/exdirect",
         "project_folders": project_folders_under("/home/kojima/exdirect"),
-        "llm_backends": ["codex-cli", "claude-cli", "ollama"],
+        "llm_backends": ["codex-cli", "claude-cli"],
         "default_llm_backend": "codex-cli",
         "default_model": CODEX_MODEL,
-        "backend_default_models": REMOTE_BACKEND_DEFAULT_MODELS,
+        "backend_default_models": {
+            "codex-cli": CODEX_MODEL,
+            "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "sonnet"),
+        },
     },
     {
         "id": "aixec-api-192-168-0-14",
@@ -306,10 +309,13 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
             "aixec",
             "url2ai",
         ]),
-        "llm_backends": ["codex-cli", "claude-cli", "ollama"],
+        "llm_backends": ["codex-cli", "claude-cli"],
         "default_llm_backend": "codex-cli",
         "default_model": CODEX_MODEL,
-        "backend_default_models": REMOTE_BACKEND_DEFAULT_MODELS,
+        "backend_default_models": {
+            "codex-cli": CODEX_MODEL,
+            "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "sonnet"),
+        },
     },
 ]
 
@@ -941,12 +947,14 @@ def run_remote_claude(agent: dict[str, Any], cwd: str, model: str, prompt: str, 
         f"bin=$({remote_executable_probe(REMOTE_CLAUDE_CANDIDATES)}); "
         f"cd {shlex.quote(cwd)}; "
         "\"$bin\" -p "
+        f"{shlex.quote(prompt)} "
         f"--model {shlex.quote(model)} "
         "--output-format text "
+        "--tools '' "
         f"--permission-mode {shlex.quote(permission_mode)}"
     )
-    returncode, stdout, stderr = run_remote_ssh_command(agent, remote_script, prompt, 900, job_id)
-    text = stdout.strip() or stderr.strip()
+    returncode, stdout, stderr = run_remote_ssh_command(agent, remote_script, "", 900, job_id)
+    text = clean_claude_text(stdout.strip()) or stderr.strip()
     return {
         "returncode": returncode,
         "text": text,
@@ -954,6 +962,15 @@ def run_remote_claude(agent: dict[str, Any], cwd: str, model: str, prompt: str, 
         "events": [],
         "sandbox": permission_mode,
     }
+
+
+def clean_claude_text(text: str) -> str:
+    if not text.startswith("BASH="):
+        return text
+    lines = text.splitlines()
+    while lines and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", lines[0]):
+        lines.pop(0)
+    return "\n".join(lines).strip() or text
 
 
 def run_remote_ollama(agent: dict[str, Any], cwd: str, model: str, prompt: str, job_id: str) -> dict[str, Any]:
