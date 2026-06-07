@@ -92,11 +92,6 @@ MEMORY_DIR = DATA_DIR / "shared_memory"
 CHAT_SAVE_MESSAGE_LIMIT = 120
 CHAT_PROMPT_MESSAGE_LIMIT = 80
 CHAT_PROMPT_CHAR_LIMIT = 60000
-ALLOWED_ROOTS = [
-    Path(p).expanduser().resolve()
-    for p in os.environ.get("KDECK_ALLOWED_ROOTS", "/home/kojima/work/url2ai").split(",")
-    if p.strip()
-]
 REMOTE_PROJECT_NAMES = [
     "url2ai",
     "vwork",
@@ -110,6 +105,12 @@ REMOTE_PROJECT_NAMES = [
     "swork",
     "airadio-scripted-mv",
     "bittensorman.xyz",
+]
+DEFAULT_ALLOWED_ROOTS = ",".join(f"/home/kojima/work/{name}" for name in REMOTE_PROJECT_NAMES)
+ALLOWED_ROOTS = [
+    Path(p).expanduser().resolve()
+    for p in os.environ.get("KDECK_ALLOWED_ROOTS", DEFAULT_ALLOWED_ROOTS).split(",")
+    if p.strip()
 ]
 
 

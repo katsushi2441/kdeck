@@ -176,6 +176,9 @@ $default_roots = [
     '/home/kojima/work/buzblogger',
     '/home/kojima/work/swork',
     '/home/kojima/work/kdeck',
+    '/home/kojima/work/kurage',
+    '/home/kojima/work/airadio-scripted-mv',
+    '/home/kojima/work/bittensorman.xyz',
 ];
 $roots = !empty($config['allowed_roots']) && is_array($config['allowed_roots'])
     ? $config['allowed_roots']
