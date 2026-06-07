@@ -656,6 +656,14 @@ def execution_mode_instruction(execution_mode: str) -> str:
     )
 
 
+def execution_ack_message(execution_mode: str) -> str:
+    if execution_mode == "full-access":
+        return "了解しました。これから実行します。"
+    if execution_mode == "confirm":
+        return "了解しました。確認しながら進めます。"
+    return ""
+
+
 def save_agent_task(task: dict[str, Any]) -> None:
     TASK_DIR.mkdir(parents=True, exist_ok=True)
     task_id = safe_task_id(str(task.get("job_id") or task.get("task_id") or ""))
@@ -1298,6 +1306,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
         "cwd": str(cwd),
         "local_cwd": req.local_cwd,
         "message": "",
+        "ack_message": execution_ack_message(execution_mode),
         "error": "",
         "created": int(time.time()),
         "finished": 0,
@@ -1354,6 +1363,9 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
     CHAT_META[thread_id]["local_cwd"] = local_cwd
     CHAT_META[thread_id]["remote_llm_backend"] = remote_llm_backend
     CHAT_META[thread_id]["remote_model"] = remote_model
+    ack_message = execution_ack_message(execution_mode)
+    if ack_message:
+        history.append({"role": "assistant", "content": ack_message})
     save_thread(thread_id, str(cwd), model, target_agent, local_cwd, remote_llm_backend, remote_model)
     if agent.get("kind") == "local":
         result = run_codex_exec(cwd, model, prompt, job_id, execution_mode)

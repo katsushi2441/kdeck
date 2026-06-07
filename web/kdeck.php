@@ -743,7 +743,13 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  }
 	  input.value = '';
 	  addBubble('user', prompt);
-	  const pending = addBubble('assistant', executionMode === 'chat-only' ? '考えています...' : '了解しました。実行します。');
+	  let pending;
+	  if(executionMode === 'chat-only'){
+	    pending = addBubble('assistant', '考えています...');
+	  } else {
+	    addBubble('assistant', executionMode === 'full-access' ? '了解しました。これから実行します。' : '了解しました。確認しながら進めます。');
+	    pending = addBubble('assistant', '実行中...');
+	  }
 	  localStorage.setItem('kdeck.folder', folderSelect.value);
 	  localStorage.setItem('kdeck.localFolder', localFolderSelect.value);
 	  localStorage.setItem('kdeck.folder.' + targetAgent, folderSelect.value);
