@@ -163,7 +163,7 @@ $default_roots = [
 $roots = !empty($config['allowed_roots']) && is_array($config['allowed_roots'])
     ? $config['allowed_roots']
     : $default_roots;
-$codex_model = $config['codex_model'] ?? 'gpt-5.4-mini';
+$codex_model = $config['codex_model'] ?? 'gpt-5.5';
 $execution_modes = !empty($config['execution_modes']) && is_array($config['execution_modes'])
     ? $config['execution_modes']
     : [
