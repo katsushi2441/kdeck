@@ -25,6 +25,8 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from app import controller
+
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 APP_NAME = "Kurage Agent Deck"
@@ -761,6 +763,32 @@ def agent_tasks() -> dict[str, Any]:
 @app.get("/api/shared_memory", dependencies=[Depends(require_auth)])
 def shared_memory() -> dict[str, Any]:
     return {"ok": True, "items": list_shared_memory()}
+
+
+@app.get("/api/controller/status", dependencies=[Depends(require_auth)])
+def controller_status() -> dict[str, Any]:
+    return controller.status()
+
+
+@app.post("/api/controller/tick", dependencies=[Depends(require_auth)])
+def controller_tick() -> dict[str, Any]:
+    return controller.tick()
+
+
+@app.post("/api/controller/goals/{goal_name}/hold", dependencies=[Depends(require_auth)])
+def controller_hold_goal(goal_name: str) -> dict[str, Any]:
+    try:
+        return controller.set_goal_status(goal_name, "hold")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="goal not found")
+
+
+@app.post("/api/controller/goals/{goal_name}/resume", dependencies=[Depends(require_auth)])
+def controller_resume_goal(goal_name: str) -> dict[str, Any]:
+    try:
+        return controller.set_goal_status(goal_name, "waiting")
+    except KeyError:
+        raise HTTPException(status_code=404, detail="goal not found")
 
 
 def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE) -> dict[str, Any]:
