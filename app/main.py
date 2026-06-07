@@ -66,6 +66,11 @@ REMOTE_BACKEND_DEFAULT_MODELS = {
     "ollama": os.environ.get("KDECK_REMOTE_OLLAMA_MODEL", "gemma4:e4b"),
 }
 CODEX_EXECUTION_MODES = {
+    "chat-only": {
+        "label": "Chat only",
+        "sandbox": "read-only",
+        "description": "議論だけを行い、コマンド実行・ファイル変更・外部操作はしません。",
+    },
     "confirm": {
         "label": "確認して実行",
         "sandbox": "workspace-write",
@@ -77,9 +82,9 @@ CODEX_EXECUTION_MODES = {
         "description": "確認なしでCodex CLIをdanger-full-accessで実行します。",
     },
 }
-DEFAULT_EXECUTION_MODE = os.environ.get("KDECK_DEFAULT_EXECUTION_MODE", "confirm").strip() or "confirm"
+DEFAULT_EXECUTION_MODE = os.environ.get("KDECK_DEFAULT_EXECUTION_MODE", "chat-only").strip() or "chat-only"
 if DEFAULT_EXECUTION_MODE not in CODEX_EXECUTION_MODES:
-    DEFAULT_EXECUTION_MODE = "confirm"
+    DEFAULT_EXECUTION_MODE = "chat-only"
 DATA_DIR = Path(os.environ.get("KDECK_DATA_DIR", Path(__file__).resolve().parents[1] / "storage")).expanduser()
 CHAT_DIR = DATA_DIR / "chat_threads"
 TASK_DIR = DATA_DIR / "agent_tasks"
@@ -628,6 +633,27 @@ def validate_cwd(cwd: str) -> Path:
 def normalize_execution_mode(mode: str) -> str:
     mode = (mode or "").strip()
     return mode if mode in CODEX_EXECUTION_MODES else DEFAULT_EXECUTION_MODE
+
+
+def execution_mode_instruction(execution_mode: str) -> str:
+    if execution_mode == "chat-only":
+        return (
+            "Execution mode: chat-only.\n"
+            "Discuss only. Do not run shell commands, do not call tools, do not edit files, "
+            "do not access external services, and do not claim you changed anything. "
+            "If the user asks for implementation, explain what you would do and ask them to switch execution mode.\n\n"
+        )
+    if execution_mode == "full-access":
+        return (
+            "Execution mode: full-access.\n"
+            "Before taking any action, start your response with a short acknowledgement in Japanese such as "
+            "'了解しました。これから実行します。' Then proceed with the requested work.\n\n"
+        )
+    return (
+        "Execution mode: confirm.\n"
+        "Before taking any action, start your response with a short acknowledgement in Japanese such as "
+        "'了解しました。確認しながら進めます。' Then proceed within the selected sandbox.\n\n"
+    )
 
 
 def save_agent_task(task: dict[str, Any]) -> None:
@@ -1315,6 +1341,7 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         "You are Codex in Kurage Agent Deck. Answer in Japanese unless the user asks otherwise.\n"
         "Continue the conversation below and act on the selected workspace when needed.\n"
         "The conversation block is persisted chat history from this deck. Use it as context when answering.\n\n"
+        + execution_mode_instruction(execution_mode)
         + agent_context
         + (transcript + "\n\n" if transcript else "")
         + "USER:\n"

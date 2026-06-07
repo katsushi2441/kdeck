@@ -184,10 +184,11 @@ $codex_model = $config['codex_model'] ?? 'gpt-5.5';
 $execution_modes = !empty($config['execution_modes']) && is_array($config['execution_modes'])
     ? $config['execution_modes']
     : [
+        'chat-only' => ['label' => 'Chat only', 'sandbox' => 'read-only'],
         'confirm' => ['label' => '確認して実行', 'sandbox' => 'workspace-write'],
         'full-access' => ['label' => 'Full access', 'sandbox' => 'danger-full-access'],
     ];
-$default_execution_mode = $config['default_execution_mode'] ?? 'confirm';
+$default_execution_mode = $config['default_execution_mode'] ?? 'chat-only';
 $agents = !empty($config['agents']) && is_array($config['agents'])
     ? $config['agents']
     : [
@@ -293,6 +294,8 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	const savedRemoteModel = localStorage.getItem('kdeck.remoteModel');
 		const savedTargetAgent = localStorage.getItem('kdeck.targetAgent');
 		const savedExecutionMode = localStorage.getItem('kdeck.executionMode');
+		const executionModeDefaultVersion = 'chat-only-20260608';
+		const shouldResetExecutionMode = localStorage.getItem('kdeck.executionModeDefaultVersion') !== executionModeDefaultVersion;
 		const savedThread = localStorage.getItem('kdeck.thread');
 		const savedMemo = localStorage.getItem('kdeck.voiceMemo');
 	if(savedLocalFolder && [...localFolderSelect.options].some(option => option.value === savedLocalFolder)){
@@ -307,7 +310,11 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	if(savedTargetAgent && [...targetAgentSelect.options].some(option => option.value === savedTargetAgent)){
 	  targetAgentSelect.value = savedTargetAgent;
 	}
-	if(savedExecutionMode && [...executionModeSelect.options].some(option => option.value === savedExecutionMode)){
+	if(shouldResetExecutionMode && [...executionModeSelect.options].some(option => option.value === 'chat-only')){
+	  executionModeSelect.value = 'chat-only';
+	  localStorage.setItem('kdeck.executionMode', 'chat-only');
+	  localStorage.setItem('kdeck.executionModeDefaultVersion', executionModeDefaultVersion);
+	} else if(savedExecutionMode && [...executionModeSelect.options].some(option => option.value === savedExecutionMode)){
 	  executionModeSelect.value = savedExecutionMode;
 	}
 	if(savedMemo){
@@ -724,7 +731,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  const input = document.getElementById('chat-input');
 	  const prompt = input.value.trim();
 	  if(!prompt) return;
-	  const executionMode = executionModeSelect.value || 'confirm';
+	  const executionMode = executionModeSelect.value || 'chat-only';
 	  const sandbox = executionModeSelect.selectedOptions[0]?.dataset?.sandbox || '';
 	  const targetAgent = targetAgentSelect.value || 'local';
 	  const remoteLlmText = targetAgent === 'local'
@@ -736,7 +743,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  }
 	  input.value = '';
 	  addBubble('user', prompt);
-	  const pending = addBubble('assistant', '実行中...');
+	  const pending = addBubble('assistant', executionMode === 'chat-only' ? '考えています...' : '了解しました。実行します。');
 	  localStorage.setItem('kdeck.folder', folderSelect.value);
 	  localStorage.setItem('kdeck.localFolder', localFolderSelect.value);
 	  localStorage.setItem('kdeck.folder.' + targetAgent, folderSelect.value);
@@ -785,8 +792,8 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	    }
 	    if(job.status === 'running'){
 	      const elapsed = Number(job.elapsed || 0);
-	      pending.firstChild.textContent = '実行中...';
-	      const modeLabel = job.execution_mode === 'full-access' ? 'Full access' : '確認';
+	      pending.firstChild.textContent = job.execution_mode === 'chat-only' ? '考えています...' : '実行中...';
+	      const modeLabel = job.execution_mode === 'chat-only' ? 'Chat only' : (job.execution_mode === 'full-access' ? 'Full access' : '確認');
 	      runControls.status.textContent = `${modeLabel} / ${job.sandbox || sandbox || ''} / ${elapsed ? `経過 ${elapsed}秒` : `確認中 ${pollCount}`}`;
 	      setTimeout(pollChat, 1500);
 	      return;

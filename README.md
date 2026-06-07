@@ -258,10 +258,13 @@ operations such as `git push`.
 
 The chat UI also has an execution mode selector:
 
+- `chat-only`: default. Discussion only; Codex is instructed not to run commands, edit files, or operate external services, and it runs with `read-only`.
 - `confirm`: asks in the browser before starting Codex and runs with `workspace-write`.
 - `full-access`: runs immediately with `danger-full-access`.
 
-Set `KDECK_DEFAULT_EXECUTION_MODE=confirm` to keep the safer mode selected by default.
+`confirm` and `full-access` show an acknowledgement in the chat before the job
+starts so the user sees that execution is beginning. Set
+`KDECK_DEFAULT_EXECUTION_MODE=chat-only` to keep discussion-only mode selected by default.
 
 ## API
 
