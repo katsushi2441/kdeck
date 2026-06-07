@@ -12,6 +12,7 @@ import signal
 import subprocess
 import threading
 import time
+import tempfile
 import uuid
 import urllib.error
 import urllib.request
@@ -34,6 +35,7 @@ CODEX_MODEL = os.environ.get("KDECK_CODEX_MODEL", "gpt-5.5")
 CODEX_SANDBOX = os.environ.get("KDECK_CODEX_SANDBOX", "workspace-write")
 SWARMCLAW_BASE_URL = os.environ.get("SWARMCLAW_BASE_URL", "http://127.0.0.1:3456").rstrip("/")
 SWARMCLAW_HOME = os.environ.get("SWARMCLAW_HOME", "/home/kojima/.swarmclaw")
+OPENCLAW_CMD = os.environ.get("KDECK_OPENCLAW_CMD", "/home/kojima/.nvm/versions/node/v24.16.0/bin/openclaw")
 REMOTE_SSH_KEY = os.environ.get("KDECK_REMOTE_SSH_KEY", "/home/kojima/.ssh/id_swarmclaw_openclaw")
 REMOTE_SSH_USER = os.environ.get("KDECK_REMOTE_SSH_USER", "kojima")
 REMOTE_SSH_PORT = int(os.environ.get("KDECK_REMOTE_SSH_PORT", "2222"))
@@ -58,7 +60,7 @@ REMOTE_OLLAMA_CANDIDATES = [
 ]
 REMOTE_BACKEND_DEFAULT_MODELS = {
     "codex-cli": CODEX_MODEL,
-    "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "sonnet"),
+    "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "claude-sonnet-4-6"),
     "ollama": os.environ.get("KDECK_REMOTE_OLLAMA_MODEL", "gemma4:e4b"),
 }
 CODEX_EXECUTION_MODES = {
@@ -268,7 +270,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "default_model": CODEX_MODEL,
         "backend_default_models": {
             "codex-cli": CODEX_MODEL,
-            "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "sonnet"),
+            "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "claude-sonnet-4-6"),
         },
     },
     {
@@ -314,7 +316,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "default_model": CODEX_MODEL,
         "backend_default_models": {
             "codex-cli": CODEX_MODEL,
-            "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "sonnet"),
+            "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "claude-sonnet-4-6"),
         },
     },
 ]
@@ -919,6 +921,180 @@ def parse_codex_json_output(stdout: str, stderr: str, returncode: int) -> tuple[
     return final_text, events[-20:]
 
 
+def openclaw_model_for_backend(backend: str, model: str) -> str:
+    model = model.strip()
+    if backend == "codex-cli":
+        return model if model.startswith("openai/") else f"openai/{model or CODEX_MODEL}"
+    if backend == "claude-cli":
+        if model.startswith("claude-cli/"):
+            return model
+        return f"claude-cli/{model or REMOTE_BACKEND_DEFAULT_MODELS['claude-cli']}"
+    if backend == "ollama":
+        return model if model.startswith("ollama/") else f"ollama/{model or REMOTE_BACKEND_DEFAULT_MODELS['ollama']}"
+    return model
+
+
+def gateway_ws_url(agent: dict[str, Any]) -> str:
+    configured = str(agent.get("ws_url") or agent.get("gateway_ws_url") or "").strip()
+    if configured:
+        return configured
+    host = str(agent.get("host") or "").strip()
+    if not host:
+        raise RuntimeError(f"{agent.get('id')} has no host configured")
+    return f"ws://{host}:18789"
+
+
+def gateway_token(gateway_id: str) -> str:
+    if not gateway_id:
+        return ""
+    env_name = "KDECK_" + re.sub(r"[^A-Za-z0-9]+", "_", gateway_id).upper() + "_TOKEN"
+    token = os.environ.get(env_name, "").strip()
+    if token:
+        return token
+    token_path = Path(SWARMCLAW_HOME) / f"{gateway_id}.token"
+    try:
+        if token_path.exists():
+            return token_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return ""
+
+
+def parse_openclaw_json(stdout: str) -> dict[str, Any]:
+    stdout = stdout.strip()
+    if not stdout:
+        return {}
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError:
+        start = stdout.find("{")
+        end = stdout.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(stdout[start:end + 1])
+        raise
+
+
+def run_remote_openclaw_agent(agent: dict[str, Any], cwd: str, backend: str, model: str, prompt: str, thread_id: str, job_id: str) -> dict[str, Any]:
+    gateway_id = str(agent.get("gateway_id") or "").strip()
+    token = gateway_token(gateway_id)
+    if not token:
+        return {
+            "returncode": 2,
+            "text": f"{gateway_id} token is not configured.",
+            "stderr_tail": "",
+            "events": [],
+        }
+    model_ref = openclaw_model_for_backend(backend, model)
+    ws_url = gateway_ws_url(agent)
+    session_suffix = re.sub(r"[^a-zA-Z0-9_-]+", "-", f"kdeck-{thread_id}-{job_id}")[:120]
+    remote_prompt = (
+        "Kurage Agent Deckからの委任タスクです。\n"
+        f"対象サーバ: {agent.get('host') or ''}\n"
+        f"対象ロール: {agent.get('role') or ''}\n"
+        f"選択されたリモート作業フォルダ: {cwd}\n"
+        "作業や確認が必要な場合は、まず上記フォルダを対象にしてください。\n\n"
+        + prompt
+    )
+    config = {
+        "gateway": {
+            "mode": "remote",
+            "remote": {
+                "transport": "direct",
+                "url": ws_url,
+                "token": token,
+            },
+        }
+    }
+    tmp_path = ""
+    proc: subprocess.Popen[str] | None = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".openclaw.json", delete=False) as tmp:
+            json.dump(config, tmp)
+            tmp.write("\n")
+            tmp_path = tmp.name
+        env = os.environ.copy()
+        openclaw_dir = str(Path(OPENCLAW_CMD).expanduser().parent)
+        env["PATH"] = f"{openclaw_dir}:" + env.get("PATH", "")
+        env["OPENCLAW_CONFIG_PATH"] = tmp_path
+        cmd = [
+            OPENCLAW_CMD,
+            "agent",
+            "--agent",
+            "main",
+            "--session-key",
+            f"agent:main:{session_suffix}",
+            "--message",
+            remote_prompt,
+            "--model",
+            model_ref,
+            "--timeout",
+            "900",
+            "--json",
+        ]
+        proc = subprocess.Popen(
+            cmd,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            env=env,
+        )
+        if job_id:
+            CHAT_PROCESSES[job_id] = proc
+        try:
+            stdout, stderr = proc.communicate(timeout=930)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = proc.communicate(timeout=10)
+            return {
+                "returncode": 124,
+                "text": "OpenClaw remote agent timed out after 900 seconds.",
+                "stderr_tail": (stderr or "")[-4000:],
+                "events": [],
+            }
+    finally:
+        if job_id:
+            CHAT_PROCESSES.pop(job_id, None)
+        if tmp_path:
+            try:
+                Path(tmp_path).unlink()
+            except OSError:
+                pass
+    stdout = stdout or ""
+    stderr = stderr or ""
+    payload: dict[str, Any] = {}
+    text = ""
+    events: list[dict[str, Any]] = []
+    if proc and proc.returncode == 0:
+        try:
+            payload = parse_openclaw_json(stdout)
+            result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+            for item in result.get("payloads", []) if isinstance(result.get("payloads"), list) else []:
+                if isinstance(item, dict) and item.get("text"):
+                    text = str(item.get("text"))
+                    break
+            if not text:
+                meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
+                text = str(meta.get("finalAssistantVisibleText") or meta.get("finalAssistantRawText") or "")
+            events = [payload]
+        except Exception:
+            text = stdout.strip()
+    if proc and proc.returncode != 0 and not text:
+        text = (stderr or stdout or f"openclaw agent exited with {proc.returncode}").strip()
+    return {
+        "returncode": proc.returncode if proc else 1,
+        "text": text,
+        "stderr_tail": stderr[-4000:],
+        "events": events[-5:],
+        "openclaw": payload,
+        "model_ref": model_ref,
+        "gateway_url": ws_url,
+    }
+
+
 def run_remote_codex(agent: dict[str, Any], cwd: str, model: str, prompt: str, job_id: str, execution_mode: str) -> dict[str, Any]:
     sandbox = CODEX_EXECUTION_MODES[normalize_execution_mode(execution_mode)]["sandbox"]
     remote_script = (
@@ -1002,12 +1178,8 @@ def run_remote_agent(agent: dict[str, Any], req: ChatRequest, thread_id: str, jo
             "stderr_tail": "",
             "remote_job": {},
         }
-    if remote_llm_backend == "codex-cli":
-        result = run_remote_codex(agent, req.cwd, remote_model, req.prompt, job_id, req.execution_mode)
-    elif remote_llm_backend == "claude-cli":
-        result = run_remote_claude(agent, req.cwd, remote_model, req.prompt, job_id, req.execution_mode)
-    elif remote_llm_backend == "ollama":
-        result = run_remote_ollama(agent, req.cwd, remote_model, req.prompt, job_id)
+    if remote_llm_backend in {"codex-cli", "claude-cli", "ollama"}:
+        result = run_remote_openclaw_agent(agent, req.cwd, remote_llm_backend, remote_model, req.prompt, thread_id, job_id)
     else:
         result = {
             "returncode": 2,
@@ -1016,13 +1188,14 @@ def run_remote_agent(agent: dict[str, Any], req: ChatRequest, thread_id: str, jo
             "events": [],
         }
     result["remote_job"] = {
-        "control_plane": "ssh",
+        "control_plane": "openclaw",
         "swarmclaw_base_url": SWARMCLAW_BASE_URL,
         "gateway_id": gateway_id,
+        "gateway_url": result.get("gateway_url") or gateway_ws_url(agent),
         "host": agent.get("host") or "",
         "cwd": req.cwd,
         "llm_backend": remote_llm_backend,
-        "model": remote_model,
+        "model": result.get("model_ref") or openclaw_model_for_backend(remote_llm_backend, remote_model),
     }
     return result
 

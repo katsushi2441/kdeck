@@ -25,6 +25,10 @@ kdeck does not talk directly to per-server HTTP agent gateways.
 - Do not add kdeck-specific HTTP gateway code to remote servers.
 - Do not clone application repositories onto a remote server just to make kdeck routing work.
 - Remote servers should contain only their own normal application files plus OpenClaw/SwarmClaw-related runtime files.
+- kdeck may use SSH only for setup and maintenance. It must not treat SSH direct execution of `codex`, `claude`, or `ollama` as agent execution.
+- Remote task execution must go through the selected server's OpenClaw gateway. The result should show `control_plane: openclaw`.
+- `codex-cli` in kdeck means OpenClaw model `openai/gpt-5.5` through the Codex app-server harness, not direct shell execution of the `codex` binary.
+- `claude-cli` in kdeck means OpenClaw model `claude-cli/claude-sonnet-4-6`, not direct shell execution of the `claude` binary.
 - Browser HTML must never contain SwarmClaw access keys, OpenClaw gateway tokens, SSH keys, or app credentials.
 - A task is successful only when the selected agent reports completed work, not when kdeck merely submits it.
 
