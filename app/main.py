@@ -31,6 +31,8 @@ TOKEN = os.environ.get("KDECK_TOKEN", "")
 CODEX_CMD = os.environ.get("KDECK_CODEX_CMD", "codex")
 CODEX_MODEL = os.environ.get("KDECK_CODEX_MODEL", "gpt-5.4-mini")
 CODEX_SANDBOX = os.environ.get("KDECK_CODEX_SANDBOX", "workspace-write")
+SWARMCLAW_BASE_URL = os.environ.get("SWARMCLAW_BASE_URL", "http://127.0.0.1:3456").rstrip("/")
+SWARMCLAW_HOME = os.environ.get("SWARMCLAW_HOME", "/home/kojima/.swarmclaw")
 CODEX_EXECUTION_MODES = {
     "confirm": {
         "label": "確認して実行",
@@ -184,6 +186,7 @@ CHAT_THREADS: dict[str, list[dict[str, str]]] = {}
 CHAT_META: dict[str, dict[str, Any]] = {}
 CHAT_JOBS: dict[str, dict[str, Any]] = {}
 CHAT_PROCESSES: dict[str, subprocess.Popen[str]] = {}
+SWARMCLAW_GATEWAY_CACHE: dict[str, Any] = {"expires": 0.0, "ids": set()}
 
 DEFAULT_AGENTS: list[dict[str, Any]] = [
     {
@@ -192,31 +195,31 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "role": "kdeck local Codex",
         "host": "192.168.0.3",
         "kind": "local",
-        "api_base": "",
+        "gateway_id": "",
     },
     {
         "id": "hermes-192-168-0-2",
         "label": "Hermes scheduler",
         "role": "Hermesジョブ、enqueue、スケジュール確認",
         "host": "192.168.0.2",
-        "kind": "remote",
-        "api_base": os.environ.get("KDECK_AGENT_HERMES_API_BASE", ""),
+        "kind": "swarmclaw",
+        "gateway_id": "openclaw-192-168-0-2",
     },
     {
         "id": "aixec-api-192-168-0-14",
         "label": "AIxEC API server",
         "role": "AIxEC API、登録API、dashboard report確認",
         "host": "192.168.0.14",
-        "kind": "remote",
-        "api_base": os.environ.get("KDECK_AGENT_AIXEC_API_BASE", ""),
+        "kind": "swarmclaw",
+        "gateway_id": "openclaw-192-168-0-14",
     },
     {
         "id": "hyperframes-192-168-0-11",
         "label": "Hyperframes video",
         "role": "Hyperframes、Kurage Horizon動画生成、YouTube投稿確認",
         "host": "192.168.0.11",
-        "kind": "remote",
-        "api_base": os.environ.get("KDECK_AGENT_HYPERFRAMES_API_BASE", ""),
+        "kind": "swarmclaw",
+        "gateway_id": "openclaw-192-168-0-11",
     },
 ]
 
@@ -243,8 +246,8 @@ def load_agents() -> list[dict[str, Any]]:
             "label": str(item.get("label") or agent_id),
             "role": str(item.get("role") or ""),
             "host": str(item.get("host") or ""),
-            "kind": str(item.get("kind") or "remote"),
-            "api_base": str(item.get("api_base") or ""),
+            "kind": str(item.get("kind") or "swarmclaw"),
+            "gateway_id": str(item.get("gateway_id") or ""),
         })
     return agents or DEFAULT_AGENTS
 
@@ -296,14 +299,55 @@ def get_agent(agent_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=400, detail="target agent is not registered")
 
 
+def swarmclaw_access_key() -> str:
+    for path in (
+        Path(SWARMCLAW_HOME) / "platform-api-key.txt",
+        Path.cwd() / "platform-api-key.txt",
+    ):
+        try:
+            if path.exists():
+                return path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+    return os.environ.get("SWARMCLAW_ACCESS_KEY", os.environ.get("SWARMCLAW_API_KEY", "")).strip()
+
+
+def swarmclaw_gateway_ids() -> set[str]:
+    now = time.time()
+    cached_ids = SWARMCLAW_GATEWAY_CACHE.get("ids")
+    if now < float(SWARMCLAW_GATEWAY_CACHE.get("expires") or 0) and isinstance(cached_ids, set):
+        return cached_ids
+    access_key = swarmclaw_access_key()
+    if not access_key:
+        return set()
+    request = urllib.request.Request(
+        SWARMCLAW_BASE_URL + "/api/gateways",
+        headers={"x-access-key": access_key, "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        SWARMCLAW_GATEWAY_CACHE.update({"expires": now + 10, "ids": set()})
+        return set()
+    ids = {str(item.get("id") or "") for item in payload if isinstance(item, dict)}
+    ids.discard("")
+    SWARMCLAW_GATEWAY_CACHE.update({"expires": now + 30, "ids": ids})
+    return ids
+
+
 def agent_public(agent: dict[str, Any]) -> dict[str, Any]:
+    kind = agent.get("kind") or ""
+    gateway_id = str(agent.get("gateway_id") or "")
     return {
         "id": agent.get("id") or "",
         "label": agent.get("label") or agent.get("id") or "",
         "role": agent.get("role") or "",
         "host": agent.get("host") or "",
-        "kind": agent.get("kind") or "",
-        "configured": bool(agent.get("kind") == "local" or agent.get("api_base")),
+        "kind": kind,
+        "gateway_id": gateway_id,
+        "configured": bool(kind == "local" or (gateway_id and gateway_id in swarmclaw_gateway_ids())),
     }
 
 
@@ -646,80 +690,27 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", executi
 
 
 def run_remote_agent(agent: dict[str, Any], req: ChatRequest, thread_id: str, job_id: str) -> dict[str, Any]:
-    api_base = str(agent.get("api_base") or "").rstrip("/")
-    if not api_base:
+    gateway_id = str(agent.get("gateway_id") or "").strip()
+    if not gateway_id:
         return {
             "returncode": 2,
-            "text": f"{agent.get('id')} is not configured. Set its Agent API base URL before sending tasks.",
+            "text": f"{agent.get('id')} is not configured. Set a SwarmClaw gateway_id before sending tasks.",
             "stderr_tail": "",
             "remote_job": {},
         }
-    payload = {
-        "prompt": req.prompt,
-        "cwd": req.cwd,
-        "thread_id": thread_id,
-        "model": req.model,
-        "execution_mode": req.execution_mode,
-        "source": "kdeck",
-        "source_job_id": job_id,
-        "target_agent": agent.get("id"),
-    }
-    token_env = "KDECK_AGENT_TOKEN_" + re.sub(r"[^A-Z0-9]+", "_", str(agent.get("id") or "").upper()).strip("_")
-    agent_token = os.environ.get(token_env, os.environ.get("KDECK_AGENT_TOKEN", ""))
-    headers = {"Content-Type": "application/json; charset=utf-8", "Accept": "application/json"}
-    if agent_token:
-        headers["Authorization"] = "Bearer " + agent_token
-    request = urllib.request.Request(
-        api_base + "/api/chat",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            remote = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return {"returncode": exc.code, "text": body or str(exc), "stderr_tail": body[-4000:], "remote_job": {}}
-    except Exception as exc:
-        return {"returncode": 1, "text": str(exc), "stderr_tail": str(exc), "remote_job": {}}
-
-    remote_job_id = str(remote.get("job_id") or "")
-    if not remote_job_id:
-        return {
-            "returncode": 0 if remote.get("ok") else 1,
-            "text": str(remote.get("message") or remote.get("error") or remote.get("detail") or remote),
-            "stderr_tail": "",
-            "remote_job": remote,
-        }
-
-    final = remote
-    for _ in range(600):
-        status_req = urllib.request.Request(
-            api_base + "/api/chat/" + remote_job_id,
-            headers=headers,
-            method="GET",
-        )
-        try:
-            with urllib.request.urlopen(status_req, timeout=20) as response:
-                final = json.loads(response.read().decode("utf-8"))
-        except Exception as exc:
-            return {"returncode": 1, "text": str(exc), "stderr_tail": str(exc), "remote_job": remote}
-        if final.get("status") != "running":
-            break
-        time.sleep(2)
-    else:
-        return {
-            "returncode": 124,
-            "text": f"Remote agent timed out: {agent.get('id')}",
-            "stderr_tail": "",
-            "remote_job": final,
-        }
     return {
-        "returncode": 0 if final.get("ok", True) and final.get("status") != "failed" else 1,
-        "text": str(final.get("message") or final.get("error") or final.get("detail") or final),
-        "stderr_tail": str(final.get("stderr_tail") or "")[-4000:],
-        "remote_job": final,
+        "returncode": 2,
+        "text": (
+            f"{agent.get('id')} is registered as SwarmClaw gateway {gateway_id}, "
+            "but kdeck task dispatch to SwarmClaw is not enabled yet. "
+            "Use the SwarmClaw control plane for this target until dispatch is implemented."
+        ),
+        "stderr_tail": "",
+        "remote_job": {
+            "control_plane": "swarmclaw",
+            "base_url": SWARMCLAW_BASE_URL,
+            "gateway_id": gateway_id,
+        },
     }
 
 

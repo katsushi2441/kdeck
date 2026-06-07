@@ -9,13 +9,13 @@ Kurage Agent Deck は、スマホやブラウザから Linux サーバ上の Cod
   -> https://kurage.exbridge.jp/kdeck.php
   -> PHP: 認証 + API プロキシ + Web UI
   -> FastAPI: http://<server>:18301
-  -> Codex CLI
-  -> 選択されたローカルワークスペース
+  -> Codex CLI または SwarmClaw
+  -> 選択されたローカル / OpenClaw 実行環境
 ```
 
 Kurage Agent Deck 自体が LLM ではありません。ユーザー認証、ワークスペース選択、API 中継、ジョブ管理、音声 UI を担当し、実際の推論やコード作業は Codex CLI に委譲します。
 
-マルチサーバ PoC では、`192.168.0.3` の kdeck を統合管理サーバにし、`192.168.0.2` を Hermes スケジューラ担当、`192.168.0.14` を AIxEC API server 担当、`192.168.0.11` を Hyperframes 動画生成担当として扱います。Web UI は `target_agent` を指定してタスクを投入し、kdeck 側にタスク履歴と短い共有要約を保存します。
+マルチサーバ PoC では、`192.168.0.3` の kdeck と SwarmClaw を統合管理サーバにし、`192.168.0.2` を Hermes スケジューラ担当、`192.168.0.14` を AIxEC API server 担当、`192.168.0.11` を Hyperframes 動画生成担当として扱います。Web UI は `target_agent` を指定しますが、リモート実行は各サーバへ直接 HTTP gateway を置くのではなく、SwarmClaw が管理する OpenClaw gateway 経由に統一します。
 
 ## 主要コンポーネント
 

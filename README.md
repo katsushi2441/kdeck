@@ -25,10 +25,14 @@ Smartphone browser
 The PHP page keeps the API token on the web server side. The browser talks to PHP, not directly to FastAPI.
 The MVP stores sessions in API process memory, so active sessions disappear when `kdeck-api` restarts.
 Chat threads are saved under `KDECK_DATA_DIR` so the web UI and later Codex turns can reopen and reference recent conversations.
-The multi-server PoC adds a `target_agent` selector so kdeck can keep task history for local and remote agent gateways.
+The multi-server PoC adds a `target_agent` selector so kdeck can keep task history for the local Codex runtime and SwarmClaw-managed OpenClaw runtimes.
 
 See [Kurage Agent Deck の技術解説](docs/kurage-agent-deck-technical-overview.md) for a Japanese technical overview.
 See [kdeck Multi-Server Agent Plan](docs/multi-server-agent-plan.md) for the 192.168.0.3 / .2 / .14 / .11 agent layout.
+
+## Multi-Server Direction
+
+`192.168.0.3` is the only kdeck/SwarmClaw control server. Other machines should not receive kdeck-specific HTTP gateways or cloned application repositories just for orchestration. They run OpenClaw, and SwarmClaw owns task state, shared memory, gateway lifecycle, and routing.
 
 ## Setup
 

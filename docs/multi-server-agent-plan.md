@@ -2,45 +2,37 @@
 
 ## Summary
 
-`192.168.0.3` is the kdeck integration server. It owns the browser UI, task history, and shared memory. Other servers run role-specific agent gateways and receive tasks from kdeck or a future SwarmClaw control plane.
+`192.168.0.3` is the kdeck integration server and the SwarmClaw control plane.
+Remote servers run OpenClaw/Codex for actual work.
+kdeck does not talk directly to per-server HTTP agent gateways.
 
-## Agents
+## Roles
 
-- `local`: kdeck local Codex on `192.168.0.3`.
-- `hermes-192-168-0-2`: Hermes scheduler agent on `192.168.0.2`.
-- `aixec-api-192-168-0-14`: AIxEC API server agent on `192.168.0.14`.
-- `hyperframes-192-168-0-11`: Hyperframes video generation agent on `192.168.0.11`.
+- `192.168.0.3`: kdeck UI/API, SwarmClaw, task history, shared memory, operator entry point.
+- `192.168.0.2`: Hermes scheduler work through an OpenClaw runtime.
+- `192.168.0.14`: AIxEC API server work through an OpenClaw runtime.
+- `192.168.0.11`: Hyperframes video work through an OpenClaw runtime.
 
-## Current PoC Interface
+## Current State
 
-- kdeck exposes agent metadata from `/api/config` and `/api/agents`.
-- The web UI sends `target_agent` with each `/api/chat` request.
-- Local tasks continue to run through Codex CLI on this server.
-- Remote tasks require the matching `KDECK_AGENT_*_API_BASE` environment variable. If the API base is not configured, kdeck returns a clear failure instead of pretending the task succeeded.
-- Task records are saved under `KDECK_DATA_DIR/agent_tasks`.
-- Short shared-memory summaries are saved under `KDECK_DATA_DIR/shared_memory`.
+- SwarmClaw runs on `192.168.0.3` at `127.0.0.1:3456`.
+- `192.168.0.14` has an OpenClaw gateway profile registered as `openclaw-192-168-0-14`.
+- The `.14` OpenClaw gateway is LAN-bound on port `18789` with token authentication.
+- kdeck should keep `target_agent` in chat/task history, but routing should go through SwarmClaw gateway profiles.
+
+## Rules
+
+- Do not add kdeck-specific HTTP gateway code to remote servers.
+- Do not clone application repositories onto a remote server just to make kdeck routing work.
+- Remote servers should contain only their own normal application files plus OpenClaw/SwarmClaw-related runtime files.
+- Browser HTML must never contain SwarmClaw access keys, OpenClaw gateway tokens, SSH keys, or app credentials.
+- A task is successful only when the selected agent reports completed work, not when kdeck merely submits it.
 
 ## Environment
 
 ```text
-KDECK_AGENT_TOKEN=
-KDECK_AGENT_HERMES_API_BASE=http://192.168.0.2:<port>
-KDECK_AGENT_AIXEC_API_BASE=http://192.168.0.14:<port>
-KDECK_AGENT_HYPERFRAMES_API_BASE=http://192.168.0.11:<port>
+SWARMCLAW_BASE_URL=http://127.0.0.1:3456
+SWARMCLAW_HOME=/home/kojima/.swarmclaw
 ```
 
-Use per-agent tokens later with:
-
-```text
-KDECK_AGENT_TOKEN_HERMES_192_168_0_2=
-KDECK_AGENT_TOKEN_AIXEC_API_192_168_0_14=
-KDECK_AGENT_TOKEN_HYPERFRAMES_192_168_0_11=
-```
-
-## Rules
-
-- kdeck is the only browser-facing entry point.
-- Agent gateway APIs must be LAN-only and protected by bearer tokens.
-- Browser HTML must never contain agent tokens.
-- Remote tasks must not be marked successful unless the remote agent returns a completed result.
-- SwarmClaw can replace the direct remote API dispatch later, but the kdeck UI should keep the same `target_agent` concept.
+The SwarmClaw access key is stored outside git under `SWARMCLAW_HOME`.
