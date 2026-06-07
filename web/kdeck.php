@@ -271,7 +271,16 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		});
 		executionModeSelect.addEventListener('change', () => localStorage.setItem('kdeck.executionMode', executionModeSelect.value));
 		historySelect.addEventListener('change', () => {
-		  if(historySelect.value) openThread(historySelect.value);
+		  if(historySelect.value) {
+		    openThread(historySelect.value);
+		  } else {
+		    chatThread = '';
+		    localStorage.removeItem('kdeck.thread');
+		    chatTitle.textContent = 'Codex Chat';
+		    chatlog.innerHTML = '';
+		    addBubble('assistant', '会話履歴を選択すると本文を表示します。');
+		    renderHistory();
+		  }
 		});
 		voiceMemo.addEventListener('input', () => localStorage.setItem('kdeck.voiceMemo', voiceMemo.value));
 	memoCopyButton.addEventListener('click', () => {
@@ -330,7 +339,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		    historyList.querySelector('.history-title').textContent = selected.title || 'Untitled chat';
 		    historyList.querySelector('.history-meta').textContent = [fmtTime(selected.updated), selected.target_agent || 'local', selected.cwd || '', selected.model || ''].filter(Boolean).join(' · ');
 		  } else {
-		    historyList.innerHTML = '<div class="empty-history">履歴を選択するとここに情報を表示します。</div>';
+		    historyList.innerHTML = '<div class="empty-history">上のリストボックスから履歴を選ぶと、右側に本文を表示します。</div>';
 		  }
 		  setActiveHistory();
 		}
