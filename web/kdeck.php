@@ -235,7 +235,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	</section>
 </main>
 <section class="panel ops">
-  <div class="ops-head"><div><h2>Goal Queue</h2><div class="muted" id="controller-status-line">読み込み中...</div></div><button type="button" id="controller-tick" class="secondary">Tick</button></div>
+  <div class="ops-head"><div><h2>Goal Queue</h2><div class="muted" id="controller-status-line">読み込み中...</div></div><button type="button" id="controller-tick" class="secondary">Hermes Tick</button></div>
   <div class="ops-grid">
     <div class="metric"><span class="muted">実行中</span><b id="metric-running">0</b></div>
     <div class="metric"><span class="muted">RQ待機</span><b id="metric-queued">0</b></div>
@@ -549,7 +549,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	    controllerStatusLine.textContent = data?.error || 'controller状態を取得できません';
 	    return;
 	  }
-	  controllerStatusLine.textContent = data.enabled ? 'kdeck controller active' : 'controller disabled';
+	  controllerStatusLine.textContent = data.enabled ? 'Hermes commander ready' : 'Hermes commander disabled';
 	  metricToday.textContent = data.today || '-';
 	  const live = data.rqdb4ai?.totals?.live || {};
 	  metricQueued.textContent = String(Number(live.queued || 0) + Number(live.started || 0));

@@ -4,7 +4,6 @@ import datetime as dt
 import json
 import os
 import sqlite3
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -23,7 +22,6 @@ RQDB4AI_API_URL = os.environ.get("KDECK_RQDB4AI_API_URL", os.environ.get("RQDB4A
 RQDB4AI_API_TOKEN = os.environ.get("KDECK_RQDB4AI_API_TOKEN", os.environ.get("RQDB4AI_API_TOKEN", "")).strip()
 WORKER_STATUS_URL = os.environ.get("KDECK_WORKER_STATUS_URL", "https://aixec.exbridge.jp/api.php?path=worker/status")
 CONTROLLER_ENABLED = os.environ.get("KDECK_CONTROLLER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
-TICK_SECONDS = int(os.environ.get("KDECK_CONTROLLER_TICK_SECONDS", "30"))
 DEFAULT_COOLDOWN_SECONDS = int(os.environ.get("KDECK_CONTROLLER_COOLDOWN_SECONDS", "900"))
 
 
@@ -130,6 +128,132 @@ DEFAULT_GOALS = [
                 "worker_name": "aixec-growth-agent-enqueue",
             },
             "timeout": 1800,
+            "result_ttl": 86400,
+            "failure_ttl": 604800,
+        },
+    },
+    {
+        "goal_name": "aixec-register-market-worker",
+        "worker_name": "aixec-register-market-worker-enqueue",
+        "description": "既存ジャンルの楽天ランキング巡回・未登録商品登録",
+        "function_name": "aixec_market_jobs.register_market_worker_job",
+        "queue": "auto",
+        "resource": "aixec-api",
+        "daily_target": 1,
+        "per_run_target": 0,
+        "max_runs_per_day": 1,
+        "cooldown_seconds": 1800,
+        "priority": 30,
+        "enabled": 1,
+        "payload": {
+            "kwargs": {"dry_run": False, "source": "worker_auto"},
+            "meta": {"project": "aixec", "app": "register_market", "source": "worker_auto", "worker_name": "aixec-register-market-worker-enqueue"},
+            "timeout": 3600,
+            "result_ttl": 86400,
+            "failure_ttl": 604800,
+        },
+    },
+    {
+        "goal_name": "horizon-worker",
+        "worker_name": "horizon-worker-enqueue",
+        "description": "Horizonの記事・動画・YouTube投稿・AIxSNS告知",
+        "function_name": "horizon_jobs.worker_auto_cycle_job",
+        "queue": "auto",
+        "resource": "ollama:192.168.0.14:gemma4:e4b",
+        "daily_target": 1,
+        "per_run_target": 1,
+        "max_runs_per_day": 3,
+        "cooldown_seconds": 1800,
+        "priority": 40,
+        "enabled": 1,
+        "payload": {
+            "kwargs": {"dry_run": False, "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b"},
+            "meta": {"project": "horizon", "app": "horizon", "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b", "worker_name": "horizon-worker-enqueue"},
+            "timeout": 3600,
+            "result_ttl": 86400,
+            "failure_ttl": 604800,
+        },
+    },
+    {
+        "goal_name": "url2ai-oss",
+        "worker_name": "url2ai-oss-enqueue",
+        "description": "URL2AI OSS登録 1回3件目標",
+        "function_name": "oss_jobs.worker_auto_cycle_job",
+        "queue": "auto",
+        "resource": "ollama:192.168.0.14:gemma4:e4b",
+        "daily_target": 12,
+        "per_run_target": 3,
+        "max_runs_per_day": 4,
+        "cooldown_seconds": 900,
+        "priority": 50,
+        "enabled": 1,
+        "payload": {
+            "kwargs": {"period": "daily", "top_n": 3, "dry_run": False, "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b"},
+            "meta": {"project": "url2ai", "app": "oss", "kind": "ollama", "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b", "worker_name": "url2ai-oss-enqueue"},
+            "timeout": 1800,
+            "result_ttl": 86400,
+            "failure_ttl": 604800,
+        },
+    },
+    {
+        "goal_name": "url2ai-polymarket",
+        "worker_name": "url2ai-polymarket-enqueue",
+        "description": "URL2AI Polymarket登録",
+        "function_name": "polymarket_jobs.worker_auto_cycle_job",
+        "queue": "auto",
+        "resource": "ollama:192.168.0.14:gemma4:e4b",
+        "daily_target": 4,
+        "per_run_target": 1,
+        "max_runs_per_day": 4,
+        "cooldown_seconds": 900,
+        "priority": 60,
+        "enabled": 1,
+        "payload": {
+            "kwargs": {"dry_run": False, "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b"},
+            "meta": {"project": "url2ai", "app": "polymarket", "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b", "worker_name": "url2ai-polymarket-enqueue"},
+            "timeout": 1800,
+            "result_ttl": 86400,
+            "failure_ttl": 604800,
+        },
+    },
+    {
+        "goal_name": "url2ai-finreport",
+        "worker_name": "url2ai-finreport-enqueue",
+        "description": "URL2AI FinReport登録",
+        "function_name": "finreport_jobs.worker_auto_cycle_job",
+        "queue": "auto",
+        "resource": "ollama:192.168.0.14:gemma4:e4b",
+        "daily_target": 2,
+        "per_run_target": 1,
+        "max_runs_per_day": 2,
+        "cooldown_seconds": 1800,
+        "priority": 70,
+        "enabled": 1,
+        "payload": {
+            "kwargs": {"dry_run": False, "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b"},
+            "meta": {"project": "url2ai", "app": "finreport", "kind": "ollama", "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b", "worker_name": "url2ai-finreport-enqueue"},
+            "timeout": 1800,
+            "result_ttl": 86400,
+            "failure_ttl": 604800,
+        },
+    },
+    {
+        "goal_name": "buzblogger",
+        "worker_name": "buzblogger-enqueue",
+        "description": "buzblogger記事生成・投稿",
+        "function_name": "buzblogger_jobs.worker_auto_cycle_job",
+        "queue": "auto",
+        "resource": "claude",
+        "daily_target": 4,
+        "per_run_target": 1,
+        "max_runs_per_day": 4,
+        "cooldown_seconds": 1800,
+        "priority": 80,
+        "enabled": 1,
+        "payload": {
+            "kwargs": {"dry_run": False, "source": "worker_auto"},
+            "meta": {"project": "buzblogger", "app": "buzblogger", "source": "worker_auto", "worker_name": "buzblogger-enqueue"},
+            "timeout": 900,
             "result_ttl": 86400,
             "failure_ttl": 604800,
         },
@@ -261,7 +385,7 @@ def insert_event(conn: sqlite3.Connection, level: str, message: str, data: dict[
 
 def api_request(method: str, base: str, path: str, payload: dict[str, Any] | None = None, token: str = "", timeout: int = 20) -> dict[str, Any]:
     body = None
-    headers = {"Accept": "application/json", "User-Agent": "kdeck-controller/0.1"}
+    headers = {"Accept": "application/json", "User-Agent": "kdeck-hermes-commander/0.1"}
     if payload is not None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         headers["Content-Type"] = "application/json; charset=utf-8"
@@ -493,37 +617,6 @@ def cooldown_ready(goal: dict[str, Any]) -> bool:
     return dt.datetime.now(dt.timezone.utc) >= until
 
 
-def tick() -> dict[str, Any]:
-    init_db()
-    if not CONTROLLER_ENABLED:
-        return {"ok": True, "enabled": False, "action": "disabled"}
-    if not RQDB4AI_API_TOKEN:
-        event("error", "RQDB4AI token is not configured", {})
-        return {"ok": False, "enabled": True, "error": "RQDB4AI token is not configured"}
-    with connect() as conn:
-        running = conn.execute("SELECT * FROM goals WHERE enabled = 1 AND status = 'running' ORDER BY priority, id LIMIT 1").fetchone()
-        if running is not None:
-            changed = refresh_running_goal(conn, row_dict(running))
-            return {"ok": True, "action": "refresh_running", "changed": changed}
-        day = today_key()
-        for row in conn.execute("SELECT * FROM goals WHERE enabled = 1 ORDER BY priority, id").fetchall():
-            goal = row_dict(row)
-            totals = daily_totals(conn, int(goal["id"]), day)
-            if totals["items"] >= int(goal["daily_target"] or 1) or totals["runs"] >= int(goal["max_runs_per_day"] or 1):
-                conn.execute(
-                    "UPDATE goals SET status = 'complete_today', last_note = ?, updated_at = ? WHERE id = ?",
-                    (f"today {totals['items']}/{goal['daily_target']} runs={totals['runs']}/{goal['max_runs_per_day']}", utc_now(), goal["id"]),
-                )
-                continue
-            if str(goal.get("status")) == "hold":
-                return {"ok": True, "action": "blocked_by_hold", "goal_name": goal["goal_name"], "note": goal.get("last_note") or ""}
-            if not cooldown_ready(goal):
-                conn.execute("UPDATE goals SET status = 'cooldown', updated_at = ? WHERE id = ?", (utc_now(), goal["id"]))
-                return {"ok": True, "action": "cooldown", "goal_name": goal["goal_name"], "cooldown_until": goal.get("cooldown_until") or ""}
-            return {"ok": True, "action": "enqueue", "response": enqueue_goal(conn, goal)}
-    return {"ok": True, "action": "idle"}
-
-
 def status() -> dict[str, Any]:
     init_db()
     with connect() as conn:
@@ -561,18 +654,3 @@ def set_goal_status(goal_name: str, status_value: str) -> dict[str, Any]:
             raise KeyError(goal_name)
     event("info", f"goal {goal_name} set to {status_value}", {})
     return {"ok": True, "goal_name": goal_name, "status": status_value}
-
-
-def run_forever() -> None:
-    init_db()
-    event("info", "kdeck controller started", {"tick_seconds": TICK_SECONDS, "enabled": CONTROLLER_ENABLED})
-    while True:
-        try:
-            tick()
-        except Exception as exc:
-            event("error", "controller tick failed", {"error": str(exc)})
-        time.sleep(max(5, TICK_SECONDS))
-
-
-if __name__ == "__main__":
-    run_forever()

@@ -177,14 +177,16 @@ Operational rules:
 - Do not expose OpenClaw tokens, SSH keys, app API tokens, or OAuth credentials to the browser or git.
 - Keep app-specific job code inside each app repository. kdeck remains a generic agent deck and orchestration UI.
 
-## Goal Queue Controller
+## Goal Queue Commander
 
-kdeck also owns the operational command loop that replaces the old time-based
-Hermes enqueue schedules on `192.168.0.2`.
+kdeck owns the operational command loop that replaces the old time-based
+Hermes enqueue schedules on `192.168.0.2`. The commander is Hermes, not a
+deterministic Python scheduler.
 
-- `kdeck-controller.service` runs on `192.168.0.3`.
-- State is stored in `storage/controller.sqlite`.
-- RQDB4AI remains the generic execution layer; kdeck decides what goal should run next.
+- `kdeck-hermes-commander.service` runs on `192.168.0.3`.
+- Hermes reads goal state, decides the next action, and uses safe kdeck tools.
+- Python stores state in `storage/controller.sqlite` and exposes safe commands; it does not choose business strategy by itself.
+- RQDB4AI remains the generic execution layer.
 - Hermes on `192.168.0.2` is no longer the scheduler. Its cron-like jobs are paused, while OpenClaw remains available for delegated server work.
 - A goal is complete only when its business result meets the goal rule, not when RQDB4AI accepted the enqueue request.
 
@@ -196,20 +198,45 @@ The first production goal is `aixec-market-pipeline`:
 - resource lock: `ollama:192.168.0.14:gemma4:e4b`
 - cooldown: 900 seconds between attempts
 
-If one run returns fewer than 500 items, kdeck records the partial count, keeps
-the market goal ahead of later goals, waits for cooldown, then retries with the
-next market task. Later goals such as `aixec-growth-agent` run only after the
-higher-priority goal is complete for the day or explicitly held.
+If one run returns fewer than 500 items, kdeck records the partial count.
+Hermes keeps the market goal ahead of later goals, waits for cooldown, then
+retries with the next market task. Later goals such as `aixec-growth-agent`
+run only after the higher-priority goal is complete for the day or explicitly
+held.
 
-Controller API:
+Hermes uses this tool surface:
+
+```bash
+python3 -m app.commander_tool brief
+python3 -m app.commander_tool refresh
+python3 -m app.commander_tool status
+python3 -m app.commander_tool enqueue <goal_name>
+python3 -m app.commander_tool hold <goal_name>
+python3 -m app.commander_tool resume <goal_name>
+python3 -m app.commander_tool event warn "message" --data '{}'
+```
+
+Manual commander turn:
+
+```bash
+scripts/hermes_commander_once.sh
+```
+
+`brief` is the command Hermes should read during normal operation. It returns a
+small JSON object with `next_goal`, `eligible`, and `blocked_reason`, so Hermes
+does not need to parse large RQDB4AI job results. The commander must only act
+on `next_goal`; it must not skip a higher-priority incomplete goal to run a
+lower-priority goal.
+
+Commander API:
 
 - `GET /api/controller/status`
-- `POST /api/controller/tick`
+- `POST /api/controller/tick` runs one Hermes commander turn
 - `POST /api/controller/goals/{goal_name}/hold`
 - `POST /api/controller/goals/{goal_name}/resume`
 
 The web UI at `kdeck.php` shows Goal Queue, today progress, active/cooldown
-state, RQDB4AI live queue counts, worker status, and controller decision logs.
+state, RQDB4AI live queue counts, worker status, and Hermes decision logs.
 
 ## Setup
 

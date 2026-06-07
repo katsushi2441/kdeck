@@ -772,7 +772,24 @@ def controller_status() -> dict[str, Any]:
 
 @app.post("/api/controller/tick", dependencies=[Depends(require_auth)])
 def controller_tick() -> dict[str, Any]:
-    return controller.tick()
+    script = Path(__file__).resolve().parents[1] / "scripts" / "hermes_commander_once.sh"
+    if not script.exists():
+        raise HTTPException(status_code=500, detail="hermes commander script not found")
+    proc = subprocess.run(
+        [str(script)],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        text=True,
+        capture_output=True,
+        timeout=600,
+        check=False,
+    )
+    return {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "stdout_tail": proc.stdout[-4000:],
+        "stderr_tail": proc.stderr[-4000:],
+        "status": controller.status(),
+    }
 
 
 @app.post("/api/controller/goals/{goal_name}/hold", dependencies=[Depends(require_auth)])

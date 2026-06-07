@@ -1,13 +1,13 @@
 [Unit]
-Description=Kurage Agent Deck Goal Queue Controller
-After=network-online.target redis.service
+Description=Kurage Agent Deck Hermes Commander
+After=network-online.target kdeck-api.service
 
 [Service]
 Type=simple
 WorkingDirectory=/home/kojima/work/kdeck
 Environment=HOME=/home/kojima
 Environment=PATH=/home/kojima/.nvm/versions/node/v24.16.0/bin:/home/kojima/.npm-global/bin:/home/kojima/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/home/kojima/work/kdeck/scripts/run_controller.sh
+ExecStart=/home/kojima/work/kdeck/scripts/run_hermes_commander.sh
 Restart=on-failure
 RestartSec=10
 
