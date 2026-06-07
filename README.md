@@ -177,15 +177,14 @@ Operational rules:
 - Do not expose OpenClaw tokens, SSH keys, app API tokens, or OAuth credentials to the browser or git.
 - Keep app-specific job code inside each app repository. kdeck remains a generic agent deck and orchestration UI.
 
-## Goal Queue Commander
+## Goal Queue Runner
 
 kdeck owns the operational command loop that replaces the old time-based
-Hermes enqueue schedules on `192.168.0.2`. The commander is Hermes, not a
-deterministic Python scheduler.
+Hermes enqueue schedules on `192.168.0.2`.
 
-- `kdeck-hermes-commander.service` runs on `192.168.0.3`.
-- Hermes reads goal state, decides the next action, and uses safe kdeck tools.
-- Python stores state in `storage/controller.sqlite` and exposes safe commands; it does not choose business strategy by itself.
+- `kdeck-python-goal-runner.service` currently runs on `192.168.0.3`.
+- Python stores state in `storage/controller.sqlite`, refreshes running jobs, and enqueues the next eligible goal.
+- Hermes commander is disabled for normal automation until it is redesigned as a true operator/planner instead of a slow cron wrapper.
 - RQDB4AI remains the generic execution layer.
 - Hermes on `192.168.0.2` is no longer the scheduler. Its cron-like jobs are paused, while OpenClaw remains available for delegated server work.
 - A goal is complete only when its business result meets the goal rule, not when RQDB4AI accepted the enqueue request.
@@ -194,39 +193,38 @@ The first production goal is `aixec-market-pipeline`:
 
 - per-run target: 500 newly registered/updated market items
 - daily target: 2000 items
-- maximum runs per day: 4
+- maximum runs per day: effectively unlimited; it keeps running until the daily target is met
 - resource lock: `ollama:192.168.0.14:gemma4:e4b`
 - cooldown: 900 seconds between attempts
 
 If one run returns fewer than 500 items, kdeck records the partial count.
-Hermes keeps the market goal ahead of later goals, waits for cooldown, then
-retries with the next market task. Later goals such as `aixec-growth-agent`
-run only after the higher-priority goal is complete for the day or explicitly
-held.
+The runner retries market-pipeline until the daily target is met, but it does not
+block every other worker while market is cooling down. During market cooldown,
+the runner may run the next eligible goal such as register-market, Horizon, OSS,
+Polymarket, FinReport, or buzblogger.
 
-Hermes uses this tool surface:
+Operational tool surface:
 
 ```bash
 python3 -m app.commander_tool brief
 python3 -m app.commander_tool refresh
 python3 -m app.commander_tool status
 python3 -m app.commander_tool enqueue <goal_name>
+python3 -m app.commander_tool run-once
 python3 -m app.commander_tool hold <goal_name>
 python3 -m app.commander_tool resume <goal_name>
 python3 -m app.commander_tool event warn "message" --data '{}'
 ```
 
-Manual commander turn:
+Manual Python runner turn:
 
 ```bash
-scripts/hermes_commander_once.sh
+python3 -m app.commander_tool run-once
 ```
 
-`brief` is the command Hermes should read during normal operation. It returns a
-small JSON object with `next_goal`, `eligible`, and `blocked_reason`, so Hermes
-does not need to parse large RQDB4AI job results. The commander must only act
-on `next_goal`; it must not skip a higher-priority incomplete goal to run a
-lower-priority goal.
+`brief` returns a small JSON object with `next_goal`, `eligible`, and
+`blocked_reason`. `run-once` refreshes running jobs, waits if anything is
+running, and otherwise enqueues one eligible goal.
 
 Commander API:
 

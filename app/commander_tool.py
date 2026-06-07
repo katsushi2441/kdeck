@@ -54,7 +54,8 @@ def command_brief(_args: argparse.Namespace) -> None:
             })
         day = controller.today_key()
         goals = []
-        next_goal: dict[str, Any] | None = None
+        running_goal: dict[str, Any] | None = None
+        first_eligible_goal: dict[str, Any] | None = None
         for row in conn.execute("SELECT * FROM goals WHERE enabled = 1 ORDER BY priority, id").fetchall():
             goal = controller.row_dict(row)
             totals = controller.daily_totals(conn, int(goal["id"]), day)
@@ -85,8 +86,11 @@ def command_brief(_args: argparse.Namespace) -> None:
                 "last_note": goal.get("last_note") or "",
             }
             goals.append(brief_goal)
-            if next_goal is None and blocked_reason != "daily_target_complete":
-                next_goal = brief_goal
+            if running_goal is None and blocked_reason == "running":
+                running_goal = brief_goal
+            if first_eligible_goal is None and not blocked_reason:
+                first_eligible_goal = brief_goal
+        next_goal = running_goal or first_eligible_goal
     print_json({
         "ok": True,
         "today": controller.today_key(),
@@ -121,6 +125,50 @@ def command_enqueue(args: argparse.Namespace) -> None:
     print_json({"ok": True, "action": "enqueue", "goal_name": args.goal_name, "response": response})
 
 
+def command_run_once(_args: argparse.Namespace) -> None:
+    controller.init_db()
+    with controller.connect() as conn:
+        running_rows = conn.execute("SELECT * FROM goals WHERE enabled = 1 AND status = 'running' ORDER BY priority, id").fetchall()
+        refreshed: list[dict[str, Any]] = []
+        for row in running_rows:
+            goal = controller.row_dict(row)
+            refreshed.append({
+                "goal_name": goal["goal_name"],
+                "changed": controller.refresh_running_goal(conn, goal),
+            })
+
+        running = conn.execute("SELECT goal_name, current_job_id FROM goals WHERE enabled = 1 AND status = 'running' ORDER BY priority, id LIMIT 1").fetchone()
+        if running is not None:
+            print_json({"ok": True, "action": "wait_running", "running": dict(running), "refresh": refreshed})
+            return
+
+        day = controller.today_key()
+        for row in conn.execute("SELECT * FROM goals WHERE enabled = 1 ORDER BY priority, id").fetchall():
+            goal = controller.row_dict(row)
+            totals = controller.daily_totals(conn, int(goal["id"]), day)
+            if totals["items"] >= int(goal.get("daily_target") or 1):
+                conn.execute(
+                    "UPDATE goals SET status = 'complete_today', last_note = ?, updated_at = ? WHERE id = ?",
+                    (f"daily target complete: {totals['items']}/{goal['daily_target']}", controller.utc_now(), goal["id"]),
+                )
+                continue
+            if totals["runs"] >= int(goal.get("max_runs_per_day") or 1):
+                conn.execute(
+                    "UPDATE goals SET status = 'complete_today', last_note = ?, updated_at = ? WHERE id = ?",
+                    (f"max runs reached: runs={totals['runs']} items={totals['items']}/{goal['daily_target']}", controller.utc_now(), goal["id"]),
+                )
+                continue
+            if str(goal.get("status")) == "hold":
+                continue
+            if not controller.cooldown_ready(goal):
+                conn.execute("UPDATE goals SET status = 'cooldown', updated_at = ? WHERE id = ?", (controller.utc_now(), goal["id"]))
+                continue
+            response = controller.enqueue_goal(conn, goal)
+            print_json({"ok": True, "action": "enqueue", "goal_name": goal["goal_name"], "response": response, "refresh": refreshed})
+            return
+    print_json({"ok": True, "action": "idle", "refresh": refreshed})
+
+
 def command_hold(args: argparse.Namespace) -> None:
     print_json(controller.set_goal_status(args.goal_name, "hold"))
 
@@ -150,6 +198,8 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue.add_argument("goal_name")
     enqueue.add_argument("--force", action="store_true")
     enqueue.set_defaults(func=command_enqueue)
+
+    sub.add_parser("run-once").set_defaults(func=command_run_once)
 
     hold = sub.add_parser("hold")
     hold.add_argument("goal_name")

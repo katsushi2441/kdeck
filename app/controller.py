@@ -63,13 +63,13 @@ DEFAULT_GOALS = [
     {
         "goal_name": "aixec-market-pipeline",
         "worker_name": "aixec-market-pipeline-enqueue",
-        "description": "AIxEC market-pipeline 新規500件 x 1日4回 = 2000件",
+        "description": "AIxEC market-pipeline 新規2000件/日を達成するまで継続",
         "function_name": "aixec_market_jobs.market_pipeline_job",
         "queue": "auto",
         "resource": "ollama:192.168.0.14:gemma4:e4b",
         "daily_target": 2000,
         "per_run_target": 500,
-        "max_runs_per_day": 4,
+        "max_runs_per_day": 999,
         "cooldown_seconds": DEFAULT_COOLDOWN_SECONDS,
         "priority": 10,
         "enabled": 1,
@@ -336,7 +336,20 @@ def init_db() -> None:
                     priority, enabled, payload, created_at, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(goal_name) DO NOTHING
+                ON CONFLICT(goal_name) DO UPDATE SET
+                    worker_name = excluded.worker_name,
+                    description = excluded.description,
+                    function_name = excluded.function_name,
+                    queue = excluded.queue,
+                    resource = excluded.resource,
+                    daily_target = excluded.daily_target,
+                    per_run_target = excluded.per_run_target,
+                    max_runs_per_day = excluded.max_runs_per_day,
+                    cooldown_seconds = excluded.cooldown_seconds,
+                    priority = excluded.priority,
+                    enabled = excluded.enabled,
+                    payload = excluded.payload,
+                    updated_at = excluded.updated_at
                 """,
                 (
                     goal["goal_name"],
