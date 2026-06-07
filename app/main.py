@@ -15,6 +15,7 @@ import time
 import uuid
 import urllib.error
 import urllib.request
+import shlex
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,33 @@ CODEX_MODEL = os.environ.get("KDECK_CODEX_MODEL", "gpt-5.4-mini")
 CODEX_SANDBOX = os.environ.get("KDECK_CODEX_SANDBOX", "workspace-write")
 SWARMCLAW_BASE_URL = os.environ.get("SWARMCLAW_BASE_URL", "http://127.0.0.1:3456").rstrip("/")
 SWARMCLAW_HOME = os.environ.get("SWARMCLAW_HOME", "/home/kojima/.swarmclaw")
+REMOTE_SSH_KEY = os.environ.get("KDECK_REMOTE_SSH_KEY", "/home/kojima/.ssh/id_swarmclaw_openclaw")
+REMOTE_SSH_USER = os.environ.get("KDECK_REMOTE_SSH_USER", "kojima")
+REMOTE_SSH_PORT = int(os.environ.get("KDECK_REMOTE_SSH_PORT", "2222"))
+REMOTE_CODEX_CANDIDATES = [
+    "~/.local/bin/codex",
+    "~/.npm-global/bin/codex",
+    "/usr/local/bin/codex",
+    "/usr/bin/codex",
+    "codex",
+]
+REMOTE_CLAUDE_CANDIDATES = [
+    "/usr/bin/claude",
+    "/usr/local/bin/claude",
+    "~/.local/bin/claude",
+    "~/.npm-global/bin/claude",
+    "claude",
+]
+REMOTE_OLLAMA_CANDIDATES = [
+    "/usr/local/bin/ollama",
+    "/usr/bin/ollama",
+    "ollama",
+]
+REMOTE_BACKEND_DEFAULT_MODELS = {
+    "codex-cli": CODEX_MODEL,
+    "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "sonnet"),
+    "ollama": os.environ.get("KDECK_REMOTE_OLLAMA_MODEL", "gemma4:e4b"),
+}
 CODEX_EXECUTION_MODES = {
     "confirm": {
         "label": "確認して実行",
@@ -224,6 +252,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "llm_backends": ["codex-cli"],
         "default_llm_backend": "codex-cli",
         "default_model": CODEX_MODEL,
+        "backend_default_models": {"codex-cli": CODEX_MODEL},
     },
     {
         "id": "hermes-192-168-0-2",
@@ -237,6 +266,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "llm_backends": ["codex-cli", "claude-cli", "ollama"],
         "default_llm_backend": "codex-cli",
         "default_model": CODEX_MODEL,
+        "backend_default_models": REMOTE_BACKEND_DEFAULT_MODELS,
     },
     {
         "id": "aixec-api-192-168-0-14",
@@ -258,6 +288,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "llm_backends": ["codex-cli", "claude-cli", "ollama"],
         "default_llm_backend": "codex-cli",
         "default_model": CODEX_MODEL,
+        "backend_default_models": REMOTE_BACKEND_DEFAULT_MODELS,
     },
     {
         "id": "hyperframes-192-168-0-11",
@@ -278,6 +309,7 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "llm_backends": ["codex-cli", "claude-cli", "ollama"],
         "default_llm_backend": "codex-cli",
         "default_model": CODEX_MODEL,
+        "backend_default_models": REMOTE_BACKEND_DEFAULT_MODELS,
     },
 ]
 
@@ -319,6 +351,7 @@ def load_agents() -> list[dict[str, Any]]:
             ] if isinstance(item.get("llm_backends"), list) else ["codex-cli", "claude-cli", "ollama"],
             "default_llm_backend": str(item.get("default_llm_backend") or "codex-cli"),
             "default_model": str(item.get("default_model") or CODEX_MODEL),
+            "backend_default_models": item.get("backend_default_models") if isinstance(item.get("backend_default_models"), dict) else REMOTE_BACKEND_DEFAULT_MODELS,
             "allowed_roots": [
                 str(p).strip()
                 for p in item.get("allowed_roots", [])
@@ -438,6 +471,7 @@ def agent_public(agent: dict[str, Any]) -> dict[str, Any]:
         "llm_backends": agent.get("llm_backends") or ["codex-cli"],
         "default_llm_backend": agent.get("default_llm_backend") or "codex-cli",
         "default_model": agent.get("default_model") or CODEX_MODEL,
+        "backend_default_models": agent.get("backend_default_models") or {},
         "configured": bool(kind == "local" or (gateway_id and gateway_id in swarmclaw_gateway_ids())),
     }
 
@@ -789,10 +823,161 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", executi
     }
 
 
+def remote_backend_model(backend: str, requested: str, agent: dict[str, Any]) -> str:
+    requested = requested.strip()
+    if requested:
+        return requested
+    defaults = agent.get("backend_default_models")
+    if isinstance(defaults, dict):
+        model = str(defaults.get(backend) or "").strip()
+        if model:
+            return model
+    return REMOTE_BACKEND_DEFAULT_MODELS.get(backend, CODEX_MODEL)
+
+
+def remote_executable_probe(candidates: list[str]) -> str:
+    quoted = " ".join(shlex.quote(candidate) for candidate in candidates)
+    return (
+        "for candidate in " + quoted + "; do "
+        "expanded=$(eval printf '%s' \"$candidate\"); "
+        "if command -v \"$expanded\" >/dev/null 2>&1; then command -v \"$expanded\"; exit 0; fi; "
+        "if [ -x \"$expanded\" ]; then printf '%s\\n' \"$expanded\"; exit 0; fi; "
+        "done; exit 127"
+    )
+
+
+def ssh_base_command(agent: dict[str, Any]) -> list[str]:
+    host = str(agent.get("host") or "").strip()
+    if not host:
+        raise RuntimeError(f"{agent.get('id')} has no host configured")
+    cmd = [
+        "ssh",
+        "-i",
+        REMOTE_SSH_KEY,
+        "-p",
+        str(REMOTE_SSH_PORT),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "StrictHostKeyChecking=no",
+        f"{REMOTE_SSH_USER}@{host}",
+    ]
+    return cmd
+
+
+def run_remote_ssh_command(agent: dict[str, Any], remote_script: str, prompt: str, timeout: int, job_id: str = "") -> tuple[int, str, str]:
+    cmd = ssh_base_command(agent) + ["bash", "-lc", remote_script]
+    proc = subprocess.Popen(
+        cmd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE,
+        start_new_session=True,
+    )
+    if job_id:
+        CHAT_PROCESSES[job_id] = proc
+    try:
+        stdout, stderr = proc.communicate(prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = proc.communicate(timeout=10)
+        return 124, stdout, (stderr or "") + f"\nremote command timed out after {timeout} seconds"
+    finally:
+        if job_id:
+            CHAT_PROCESSES.pop(job_id, None)
+    return proc.returncode, stdout or "", stderr or ""
+
+
+def parse_codex_json_output(stdout: str, stderr: str, returncode: int) -> tuple[str, list[dict[str, Any]]]:
+    final_text = ""
+    events: list[dict[str, Any]] = []
+    for line in stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        events.append(event)
+        item = event.get("item")
+        if event.get("type") == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message":
+            final_text = str(item.get("text", ""))
+        if event.get("type") == "turn.failed" and not final_text:
+            final_text = str(event.get("error", {}).get("message", "Codex turn failed"))
+    if returncode != 0 and not final_text:
+        final_text = (stderr or stdout or f"remote codex exited with {returncode}").strip()
+    return final_text, events[-20:]
+
+
+def run_remote_codex(agent: dict[str, Any], cwd: str, model: str, prompt: str, job_id: str, execution_mode: str) -> dict[str, Any]:
+    sandbox = CODEX_EXECUTION_MODES[normalize_execution_mode(execution_mode)]["sandbox"]
+    remote_script = (
+        "set -e; "
+        f"bin=$({remote_executable_probe(REMOTE_CODEX_CANDIDATES)}); "
+        f"cd {shlex.quote(cwd)}; "
+        "\"$bin\" exec --json "
+        f"-m {shlex.quote(model)} "
+        f"--sandbox {shlex.quote(sandbox)} -"
+    )
+    returncode, stdout, stderr = run_remote_ssh_command(agent, remote_script, prompt, 900, job_id)
+    text, events = parse_codex_json_output(stdout, stderr, returncode)
+    return {
+        "returncode": returncode,
+        "text": text,
+        "stderr_tail": stderr[-4000:],
+        "events": events,
+        "sandbox": sandbox,
+    }
+
+
+def run_remote_claude(agent: dict[str, Any], cwd: str, model: str, prompt: str, job_id: str, execution_mode: str) -> dict[str, Any]:
+    permission_mode = "bypassPermissions" if normalize_execution_mode(execution_mode) == "full-access" else "default"
+    remote_script = (
+        "set -e; "
+        f"bin=$({remote_executable_probe(REMOTE_CLAUDE_CANDIDATES)}); "
+        f"cd {shlex.quote(cwd)}; "
+        "\"$bin\" -p "
+        f"--model {shlex.quote(model)} "
+        "--output-format text "
+        f"--permission-mode {shlex.quote(permission_mode)}"
+    )
+    returncode, stdout, stderr = run_remote_ssh_command(agent, remote_script, prompt, 900, job_id)
+    text = stdout.strip() or stderr.strip()
+    return {
+        "returncode": returncode,
+        "text": text,
+        "stderr_tail": stderr[-4000:],
+        "events": [],
+        "sandbox": permission_mode,
+    }
+
+
+def run_remote_ollama(agent: dict[str, Any], cwd: str, model: str, prompt: str, job_id: str) -> dict[str, Any]:
+    remote_script = (
+        "set -e; "
+        f"bin=$({remote_executable_probe(REMOTE_OLLAMA_CANDIDATES)}); "
+        f"cd {shlex.quote(cwd)}; "
+        "\"$bin\" run " + shlex.quote(model)
+    )
+    returncode, stdout, stderr = run_remote_ssh_command(agent, remote_script, prompt, 300, job_id)
+    text = stdout.strip() or stderr.strip()
+    return {
+        "returncode": returncode,
+        "text": text,
+        "stderr_tail": stderr[-4000:],
+        "events": [],
+        "sandbox": "ollama",
+    }
+
+
 def run_remote_agent(agent: dict[str, Any], req: ChatRequest, thread_id: str, job_id: str) -> dict[str, Any]:
     gateway_id = str(agent.get("gateway_id") or "").strip()
     remote_llm_backend = req.remote_llm_backend.strip() or str(agent.get("default_llm_backend") or "codex-cli")
-    remote_model = req.remote_model.strip() or req.model.strip() or str(agent.get("default_model") or CODEX_MODEL)
+    remote_model = remote_backend_model(remote_llm_backend, req.remote_model.strip(), agent)
     if not gateway_id:
         return {
             "returncode": 2,
@@ -800,22 +985,29 @@ def run_remote_agent(agent: dict[str, Any], req: ChatRequest, thread_id: str, jo
             "stderr_tail": "",
             "remote_job": {},
         }
-    return {
-        "returncode": 2,
-        "text": (
-            f"{agent.get('id')} is registered as SwarmClaw gateway {gateway_id}, "
-            "but kdeck task dispatch to SwarmClaw is not enabled yet. "
-            "Use the SwarmClaw control plane for this target until dispatch is implemented."
-        ),
-        "stderr_tail": "",
-        "remote_job": {
-            "control_plane": "swarmclaw",
-            "base_url": SWARMCLAW_BASE_URL,
-            "gateway_id": gateway_id,
-            "llm_backend": remote_llm_backend,
-            "model": remote_model,
-        },
+    if remote_llm_backend == "codex-cli":
+        result = run_remote_codex(agent, req.cwd, remote_model, req.prompt, job_id, req.execution_mode)
+    elif remote_llm_backend == "claude-cli":
+        result = run_remote_claude(agent, req.cwd, remote_model, req.prompt, job_id, req.execution_mode)
+    elif remote_llm_backend == "ollama":
+        result = run_remote_ollama(agent, req.cwd, remote_model, req.prompt, job_id)
+    else:
+        result = {
+            "returncode": 2,
+            "text": f"Unsupported remote LLM backend: {remote_llm_backend}",
+            "stderr_tail": "",
+            "events": [],
+        }
+    result["remote_job"] = {
+        "control_plane": "ssh",
+        "swarmclaw_base_url": SWARMCLAW_BASE_URL,
+        "gateway_id": gateway_id,
+        "host": agent.get("host") or "",
+        "cwd": req.cwd,
+        "llm_backend": remote_llm_backend,
+        "model": remote_model,
     }
+    return result
 
 
 @app.post("/api/chat", dependencies=[Depends(require_auth)])

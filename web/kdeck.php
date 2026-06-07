@@ -294,7 +294,13 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  localStorage.setItem('kdeck.folder.' + targetAgent, folderSelect.value);
 	});
 	modelInput.addEventListener('change', () => localStorage.setItem('kdeck.model', modelInput.value));
-	remoteLlmBackendSelect.addEventListener('change', () => localStorage.setItem('kdeck.remoteLlmBackend', remoteLlmBackendSelect.value));
+	remoteLlmBackendSelect.addEventListener('change', () => {
+	  localStorage.setItem('kdeck.remoteLlmBackend', remoteLlmBackendSelect.value);
+	  const agent = agentMap[targetAgentSelect.value || 'local'] || {};
+	  const defaults = agent.backend_default_models || {};
+	  remoteModelInput.value = defaults[remoteLlmBackendSelect.value] || agent.default_model || modelInput.value || '';
+	  localStorage.setItem('kdeck.remoteModel', remoteModelInput.value);
+	});
 	remoteModelInput.addEventListener('change', () => localStorage.setItem('kdeck.remoteModel', remoteModelInput.value));
 		targetAgentSelect.addEventListener('change', () => {
 		  localStorage.setItem('kdeck.targetAgent', targetAgentSelect.value);
@@ -375,8 +381,13 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	    remoteLlmBackendSelect.appendChild(option);
 	  });
 	  remoteLlmBackendSelect.value = selected;
-	  if(!remoteModelInput.value || !isRemote){
-	    remoteModelInput.value = isRemote ? (agent.default_model || modelInput.value || '') : '';
+	  const defaults = agent.backend_default_models || {};
+	  const savedModel = localStorage.getItem('kdeck.remoteModel') || '';
+	  const defaultModel = defaults[selected] || agent.default_model || modelInput.value || '';
+	  if(!isRemote){
+	    remoteModelInput.value = '';
+	  } else if(!remoteModelInput.value || !savedModel || preferred !== selected) {
+	    remoteModelInput.value = defaultModel;
 	  }
 	  remoteLlmRow.style.display = isRemote ? '' : 'none';
 	}
