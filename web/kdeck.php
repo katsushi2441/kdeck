@@ -323,7 +323,9 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	function setChatState(text){ chatState.textContent = text || 'ready'; }
 	function agentRoots(agentId){
 	  const agent = agentMap[agentId] || {};
-	  const roots = Array.isArray(agent.allowed_roots) && agent.allowed_roots.length ? agent.allowed_roots : localRoots;
+	  const roots = Array.isArray(agent.project_folders) && agent.project_folders.length
+	    ? agent.project_folders
+	    : (Array.isArray(agent.allowed_roots) && agent.allowed_roots.length ? agent.allowed_roots : localRoots);
 	  return roots.filter(Boolean);
 	}
 	function populateAgentFolders(preferred = ''){

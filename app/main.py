@@ -60,6 +60,25 @@ ALLOWED_ROOTS = [
     for p in os.environ.get("KDECK_ALLOWED_ROOTS", "/home/kojima/work/url2ai").split(",")
     if p.strip()
 ]
+REMOTE_PROJECT_NAMES = [
+    "url2ai",
+    "vwork",
+    "aixec",
+    "horizon",
+    "buzblogger",
+    "rqdb4ai",
+    "kdeck",
+    "kmail",
+    "kurage",
+    "swork",
+    "airadio-scripted-mv",
+    "bittensorman.xyz",
+]
+
+
+def project_folders_under(base: str, names: list[str] | None = None) -> list[str]:
+    clean_base = base.rstrip("/")
+    return [f"{clean_base}/{name}" for name in (names or REMOTE_PROJECT_NAMES)]
 
 app = FastAPI(title=APP_NAME)
 
@@ -198,6 +217,8 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "kind": "local",
         "gateway_id": "",
         "allowed_roots": [],
+        "folder_base": "/home/kojima/work",
+        "project_folders": [],
     },
     {
         "id": "hermes-192-168-0-2",
@@ -206,7 +227,8 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "host": "192.168.0.2",
         "kind": "swarmclaw",
         "gateway_id": "openclaw-192-168-0-2",
-        "allowed_roots": ["/home/kojima/exdirect", "/home/kojima/work", "/home/kojima"],
+        "folder_base": "/home/kojima/exdirect",
+        "project_folders": project_folders_under("/home/kojima/exdirect"),
     },
     {
         "id": "aixec-api-192-168-0-14",
@@ -215,7 +237,16 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "host": "192.168.0.14",
         "kind": "swarmclaw",
         "gateway_id": "openclaw-192-168-0-14",
-        "allowed_roots": ["/home/kojima/work", "/home/kojima/exdirect", "/home/kojima"],
+        "folder_base": "/home/kojima/bittensorman/aidexx",
+        "project_folders": project_folders_under("/home/kojima/bittensorman/aidexx", [
+            "aixec",
+            "url2ai",
+            "horizon",
+            "buzblogger",
+            "vwork",
+            "kurage",
+            "kdeck",
+        ]),
     },
     {
         "id": "hyperframes-192-168-0-11",
@@ -224,7 +255,15 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "host": "192.168.0.11",
         "kind": "swarmclaw",
         "gateway_id": "openclaw-192-168-0-11",
-        "allowed_roots": ["/home/kojima/work", "/home/kojima/exdirect", "/home/kojima"],
+        "folder_base": "/home/kojima/exdirect",
+        "project_folders": project_folders_under("/home/kojima/exdirect", [
+            "horizon",
+            "airadio-scripted-mv",
+            "kurage",
+            "vwork",
+            "aixec",
+            "url2ai",
+        ]),
     },
 ]
 
@@ -253,6 +292,12 @@ def load_agents() -> list[dict[str, Any]]:
             "host": str(item.get("host") or ""),
             "kind": str(item.get("kind") or "swarmclaw"),
             "gateway_id": str(item.get("gateway_id") or ""),
+            "folder_base": str(item.get("folder_base") or "").rstrip("/"),
+            "project_folders": [
+                str(p).strip()
+                for p in item.get("project_folders", [])
+                if str(p).strip()
+            ] if isinstance(item.get("project_folders"), list) else [],
             "allowed_roots": [
                 str(p).strip()
                 for p in item.get("allowed_roots", [])
@@ -350,11 +395,15 @@ def swarmclaw_gateway_ids() -> set[str]:
 def agent_public(agent: dict[str, Any]) -> dict[str, Any]:
     kind = agent.get("kind") or ""
     gateway_id = str(agent.get("gateway_id") or "")
-    allowed_roots = [str(p) for p in ALLOWED_ROOTS] if kind == "local" else [
+    folder_base = str(agent.get("folder_base") or "").rstrip("/")
+    project_folders = [str(p) for p in ALLOWED_ROOTS] if kind == "local" else [
         str(p)
-        for p in agent.get("allowed_roots", [])
+        for p in agent.get("project_folders", [])
         if str(p).strip()
     ]
+    if kind != "local" and not project_folders and folder_base:
+        project_folders = project_folders_under(folder_base)
+    allowed_roots = project_folders or [str(p) for p in ALLOWED_ROOTS]
     return {
         "id": agent.get("id") or "",
         "label": agent.get("label") or agent.get("id") or "",
@@ -362,6 +411,8 @@ def agent_public(agent: dict[str, Any]) -> dict[str, Any]:
         "host": agent.get("host") or "",
         "kind": kind,
         "gateway_id": gateway_id,
+        "folder_base": folder_base,
+        "project_folders": project_folders,
         "allowed_roots": allowed_roots,
         "configured": bool(kind == "local" or (gateway_id and gateway_id in swarmclaw_gateway_ids())),
     }
