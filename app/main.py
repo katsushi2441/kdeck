@@ -13,6 +13,8 @@ import subprocess
 import threading
 import time
 import uuid
+import urllib.error
+import urllib.request
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -46,6 +48,11 @@ if DEFAULT_EXECUTION_MODE not in CODEX_EXECUTION_MODES:
     DEFAULT_EXECUTION_MODE = "confirm"
 DATA_DIR = Path(os.environ.get("KDECK_DATA_DIR", Path(__file__).resolve().parents[1] / "storage")).expanduser()
 CHAT_DIR = DATA_DIR / "chat_threads"
+TASK_DIR = DATA_DIR / "agent_tasks"
+MEMORY_DIR = DATA_DIR / "shared_memory"
+CHAT_SAVE_MESSAGE_LIMIT = 120
+CHAT_PROMPT_MESSAGE_LIMIT = 80
+CHAT_PROMPT_CHAR_LIMIT = 60000
 ALLOWED_ROOTS = [
     Path(p).expanduser().resolve()
     for p in os.environ.get("KDECK_ALLOWED_ROOTS", "/home/kojima/work/url2ai").split(",")
@@ -72,6 +79,7 @@ class ChatRequest(BaseModel):
     thread_id: str = ""
     model: str = ""
     execution_mode: str = DEFAULT_EXECUTION_MODE
+    target_agent: str = "local"
 
 
 class Session:
@@ -177,6 +185,72 @@ CHAT_META: dict[str, dict[str, Any]] = {}
 CHAT_JOBS: dict[str, dict[str, Any]] = {}
 CHAT_PROCESSES: dict[str, subprocess.Popen[str]] = {}
 
+DEFAULT_AGENTS: list[dict[str, Any]] = [
+    {
+        "id": "local",
+        "label": "local",
+        "role": "kdeck local Codex",
+        "host": "192.168.0.3",
+        "kind": "local",
+        "api_base": "",
+    },
+    {
+        "id": "hermes-192-168-0-2",
+        "label": "Hermes scheduler",
+        "role": "Hermesジョブ、enqueue、スケジュール確認",
+        "host": "192.168.0.2",
+        "kind": "remote",
+        "api_base": os.environ.get("KDECK_AGENT_HERMES_API_BASE", ""),
+    },
+    {
+        "id": "aixec-api-192-168-0-14",
+        "label": "AIxEC API server",
+        "role": "AIxEC API、登録API、dashboard report確認",
+        "host": "192.168.0.14",
+        "kind": "remote",
+        "api_base": os.environ.get("KDECK_AGENT_AIXEC_API_BASE", ""),
+    },
+    {
+        "id": "hyperframes-192-168-0-11",
+        "label": "Hyperframes video",
+        "role": "Hyperframes、Kurage Horizon動画生成、YouTube投稿確認",
+        "host": "192.168.0.11",
+        "kind": "remote",
+        "api_base": os.environ.get("KDECK_AGENT_HYPERFRAMES_API_BASE", ""),
+    },
+]
+
+
+def load_agents() -> list[dict[str, Any]]:
+    raw = os.environ.get("KDECK_AGENTS_JSON", "").strip()
+    if not raw:
+        return DEFAULT_AGENTS
+    try:
+        loaded = json.loads(raw)
+    except json.JSONDecodeError:
+        return DEFAULT_AGENTS
+    if not isinstance(loaded, list):
+        return DEFAULT_AGENTS
+    agents: list[dict[str, Any]] = []
+    for item in loaded:
+        if not isinstance(item, dict):
+            continue
+        agent_id = str(item.get("id") or "").strip()
+        if not agent_id:
+            continue
+        agents.append({
+            "id": agent_id,
+            "label": str(item.get("label") or agent_id),
+            "role": str(item.get("role") or ""),
+            "host": str(item.get("host") or ""),
+            "kind": str(item.get("kind") or "remote"),
+            "api_base": str(item.get("api_base") or ""),
+        })
+    return agents or DEFAULT_AGENTS
+
+
+AGENTS = load_agents()
+
 
 def require_auth(authorization: str = Header(default="")) -> None:
     if not TOKEN or TOKEN == "change-this-token":
@@ -204,8 +278,45 @@ def safe_thread_id(thread_id: str) -> str:
     return cleaned[:80]
 
 
+def safe_task_id(task_id: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "", task_id.strip())
+    return cleaned[:100]
+
+
+def safe_agent_id(agent_id: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_.-]+", "", agent_id.strip())
+    return cleaned[:100] or "local"
+
+
+def get_agent(agent_id: str) -> dict[str, Any]:
+    agent_id = safe_agent_id(agent_id)
+    for agent in AGENTS:
+        if agent.get("id") == agent_id:
+            return agent
+    raise HTTPException(status_code=400, detail="target agent is not registered")
+
+
+def agent_public(agent: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": agent.get("id") or "",
+        "label": agent.get("label") or agent.get("id") or "",
+        "role": agent.get("role") or "",
+        "host": agent.get("host") or "",
+        "kind": agent.get("kind") or "",
+        "configured": bool(agent.get("kind") == "local" or agent.get("api_base")),
+    }
+
+
 def thread_path(thread_id: str) -> Path:
     return CHAT_DIR / f"{thread_id}.json"
+
+
+def task_path(task_id: str) -> Path:
+    return TASK_DIR / f"{task_id}.json"
+
+
+def memory_path(task_id: str) -> Path:
+    return MEMORY_DIR / f"{task_id}.json"
 
 
 def thread_title(messages: list[dict[str, str]]) -> str:
@@ -214,6 +325,23 @@ def thread_title(messages: list[dict[str, str]]) -> str:
             title = re.sub(r"\s+", " ", message.get("content", "")).strip()
             return title[:52] + ("..." if len(title) > 52 else "")
     return "New chat"
+
+
+def history_transcript(messages: list[dict[str, str]]) -> str:
+    selected: list[str] = []
+    used_chars = 0
+    for message in reversed(messages[-CHAT_PROMPT_MESSAGE_LIMIT:]):
+        role = message.get("role", "").upper()
+        content = message.get("content", "")
+        if role not in {"USER", "ASSISTANT"} or not content:
+            continue
+        entry = f"{role}:\n{content}"
+        entry_chars = len(entry)
+        if selected and used_chars + entry_chars > CHAT_PROMPT_CHAR_LIMIT:
+            break
+        selected.append(entry)
+        used_chars += entry_chars
+    return "\n\n".join(reversed(selected))
 
 
 def load_thread(thread_id: str) -> list[dict[str, str]]:
@@ -243,6 +371,7 @@ def load_thread(thread_id: str) -> list[dict[str, str]]:
             "cwd": str(payload.get("cwd") or ""),
             "model": str(payload.get("model") or ""),
             "execution_mode": str(payload.get("execution_mode") or DEFAULT_EXECUTION_MODE),
+            "target_agent": str(payload.get("target_agent") or "local"),
             "created": int(payload.get("created") or 0),
             "updated": int(payload.get("updated") or 0),
         }
@@ -251,7 +380,7 @@ def load_thread(thread_id: str) -> list[dict[str, str]]:
     return CHAT_THREADS[thread_id]
 
 
-def save_thread(thread_id: str, cwd: str, model: str) -> None:
+def save_thread(thread_id: str, cwd: str, model: str, target_agent: str = "local") -> None:
     thread_id = safe_thread_id(thread_id)
     if not thread_id:
         return
@@ -266,12 +395,13 @@ def save_thread(thread_id: str, cwd: str, model: str) -> None:
         "cwd": cwd,
         "model": model,
         "execution_mode": str(meta.get("execution_mode") or DEFAULT_EXECUTION_MODE),
+        "target_agent": target_agent,
         "created": created,
         "updated": now,
-        "messages": messages[-80:],
+        "messages": messages[-CHAT_SAVE_MESSAGE_LIMIT:],
     }
     thread_path(thread_id).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    CHAT_META[thread_id] = {k: payload[k] for k in ("id", "title", "cwd", "model", "execution_mode", "created", "updated")}
+    CHAT_META[thread_id] = {k: payload[k] for k in ("id", "title", "cwd", "model", "execution_mode", "target_agent", "created", "updated")}
 
 
 def list_chat_threads() -> list[dict[str, Any]]:
@@ -287,6 +417,7 @@ def list_chat_threads() -> list[dict[str, Any]]:
                 "cwd": str(payload.get("cwd") or ""),
                 "model": str(payload.get("model") or ""),
                 "execution_mode": str(payload.get("execution_mode") or DEFAULT_EXECUTION_MODE),
+                "target_agent": str(payload.get("target_agent") or "local"),
                 "created": int(payload.get("created") or 0),
                 "updated": int(payload.get("updated") or 0),
                 "messages": len(messages),
@@ -309,6 +440,65 @@ def validate_cwd(cwd: str) -> Path:
 def normalize_execution_mode(mode: str) -> str:
     mode = (mode or "").strip()
     return mode if mode in CODEX_EXECUTION_MODES else DEFAULT_EXECUTION_MODE
+
+
+def save_agent_task(task: dict[str, Any]) -> None:
+    TASK_DIR.mkdir(parents=True, exist_ok=True)
+    task_id = safe_task_id(str(task.get("job_id") or task.get("task_id") or ""))
+    if not task_id:
+        return
+    task_path(task_id).write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def summarize_for_memory(text: str, limit: int = 1200) -> str:
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."
+
+
+def save_shared_memory(task: dict[str, Any], result_text: str) -> None:
+    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    task_id = safe_task_id(str(task.get("job_id") or task.get("task_id") or ""))
+    if not task_id:
+        return
+    record = {
+        "task_id": task_id,
+        "target_agent": task.get("target_agent") or "local",
+        "role": task.get("agent_role") or "",
+        "repo": task.get("cwd") or "",
+        "status": task.get("status") or "",
+        "summary": summarize_for_memory(result_text),
+        "created": task.get("created") or 0,
+        "finished": task.get("finished") or 0,
+    }
+    memory_path(task_id).write_text(json.dumps(record, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def list_agent_tasks() -> list[dict[str, Any]]:
+    TASK_DIR.mkdir(parents=True, exist_ok=True)
+    items: list[dict[str, Any]] = []
+    for path in TASK_DIR.glob("*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                items.append(payload)
+        except Exception:
+            continue
+    return sorted(items, key=lambda item: item.get("created") or 0, reverse=True)[:100]
+
+
+def list_shared_memory() -> list[dict[str, Any]]:
+    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    items: list[dict[str, Any]] = []
+    for path in MEMORY_DIR.glob("*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                items.append(payload)
+        except Exception:
+            continue
+    return sorted(items, key=lambda item: item.get("finished") or item.get("created") or 0, reverse=True)[:100]
 
 
 def get_session(session_id: str) -> Session:
@@ -367,8 +557,24 @@ def config() -> dict[str, Any]:
         "codex_sandbox": CODEX_SANDBOX,
         "execution_modes": CODEX_EXECUTION_MODES,
         "default_execution_mode": DEFAULT_EXECUTION_MODE,
+        "agents": [agent_public(agent) for agent in AGENTS],
         "backend": "pty",
     }
+
+
+@app.get("/api/agents", dependencies=[Depends(require_auth)])
+def agents() -> dict[str, Any]:
+    return {"ok": True, "agents": [agent_public(agent) for agent in AGENTS]}
+
+
+@app.get("/api/agent_tasks", dependencies=[Depends(require_auth)])
+def agent_tasks() -> dict[str, Any]:
+    return {"ok": True, "tasks": list_agent_tasks()}
+
+
+@app.get("/api/shared_memory", dependencies=[Depends(require_auth)])
+def shared_memory() -> dict[str, Any]:
+    return {"ok": True, "items": list_shared_memory()}
 
 
 def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE) -> dict[str, Any]:
@@ -439,9 +645,89 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", executi
     }
 
 
+def run_remote_agent(agent: dict[str, Any], req: ChatRequest, thread_id: str, job_id: str) -> dict[str, Any]:
+    api_base = str(agent.get("api_base") or "").rstrip("/")
+    if not api_base:
+        return {
+            "returncode": 2,
+            "text": f"{agent.get('id')} is not configured. Set its Agent API base URL before sending tasks.",
+            "stderr_tail": "",
+            "remote_job": {},
+        }
+    payload = {
+        "prompt": req.prompt,
+        "cwd": req.cwd,
+        "thread_id": thread_id,
+        "model": req.model,
+        "execution_mode": req.execution_mode,
+        "source": "kdeck",
+        "source_job_id": job_id,
+        "target_agent": agent.get("id"),
+    }
+    token_env = "KDECK_AGENT_TOKEN_" + re.sub(r"[^A-Z0-9]+", "_", str(agent.get("id") or "").upper()).strip("_")
+    agent_token = os.environ.get(token_env, os.environ.get("KDECK_AGENT_TOKEN", ""))
+    headers = {"Content-Type": "application/json; charset=utf-8", "Accept": "application/json"}
+    if agent_token:
+        headers["Authorization"] = "Bearer " + agent_token
+    request = urllib.request.Request(
+        api_base + "/api/chat",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            remote = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        return {"returncode": exc.code, "text": body or str(exc), "stderr_tail": body[-4000:], "remote_job": {}}
+    except Exception as exc:
+        return {"returncode": 1, "text": str(exc), "stderr_tail": str(exc), "remote_job": {}}
+
+    remote_job_id = str(remote.get("job_id") or "")
+    if not remote_job_id:
+        return {
+            "returncode": 0 if remote.get("ok") else 1,
+            "text": str(remote.get("message") or remote.get("error") or remote.get("detail") or remote),
+            "stderr_tail": "",
+            "remote_job": remote,
+        }
+
+    final = remote
+    for _ in range(600):
+        status_req = urllib.request.Request(
+            api_base + "/api/chat/" + remote_job_id,
+            headers=headers,
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(status_req, timeout=20) as response:
+                final = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            return {"returncode": 1, "text": str(exc), "stderr_tail": str(exc), "remote_job": remote}
+        if final.get("status") != "running":
+            break
+        time.sleep(2)
+    else:
+        return {
+            "returncode": 124,
+            "text": f"Remote agent timed out: {agent.get('id')}",
+            "stderr_tail": "",
+            "remote_job": final,
+        }
+    return {
+        "returncode": 0 if final.get("ok", True) and final.get("status") != "failed" else 1,
+        "text": str(final.get("message") or final.get("error") or final.get("detail") or final),
+        "stderr_tail": str(final.get("stderr_tail") or "")[-4000:],
+        "remote_job": final,
+    }
+
+
 @app.post("/api/chat", dependencies=[Depends(require_auth)])
 def chat(req: ChatRequest) -> dict[str, Any]:
-    cwd = validate_cwd(req.cwd)
+    target_agent = safe_agent_id(req.target_agent)
+    agent = get_agent(target_agent)
+    cwd = validate_cwd(req.cwd) if agent.get("kind") == "local" else Path(req.cwd).expanduser()
     model = req.model.strip() or CODEX_MODEL
     execution_mode = normalize_execution_mode(req.execution_mode)
     sandbox = CODEX_EXECUTION_MODES[execution_mode]["sandbox"]
@@ -455,6 +741,8 @@ def chat(req: ChatRequest) -> dict[str, Any]:
         "model": model,
         "execution_mode": execution_mode,
         "sandbox": sandbox,
+        "target_agent": target_agent,
+        "agent_role": agent.get("role") or "",
         "cwd": str(cwd),
         "message": "",
         "error": "",
@@ -464,7 +752,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
 
     def worker() -> None:
         try:
-            result = run_chat_turn(cwd, model, thread_id, req.prompt, job_id, execution_mode)
+            result = run_chat_turn(cwd, model, thread_id, req.prompt, job_id, execution_mode, target_agent)
             CHAT_JOBS[job_id].update(result)
             CHAT_JOBS[job_id]["status"] = "finished"
             CHAT_JOBS[job_id]["finished"] = int(time.time())
@@ -475,41 +763,67 @@ def chat(req: ChatRequest) -> dict[str, Any]:
                 "error": str(exc),
                 "finished": int(time.time()),
             })
+        finally:
+            save_agent_task(CHAT_JOBS[job_id])
+            save_shared_memory(CHAT_JOBS[job_id], str(CHAT_JOBS[job_id].get("message") or CHAT_JOBS[job_id].get("error") or ""))
 
     threading.Thread(target=worker, daemon=True).start()
+    save_agent_task(CHAT_JOBS[job_id])
     return CHAT_JOBS[job_id]
 
 
-def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE) -> dict[str, Any]:
+def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE, target_agent: str = "local") -> dict[str, Any]:
     execution_mode = normalize_execution_mode(execution_mode)
     sandbox = CODEX_EXECUTION_MODES[execution_mode]["sandbox"]
+    target_agent = safe_agent_id(target_agent)
+    agent = get_agent(target_agent)
     history = load_thread(thread_id)
-    transcript = "\n\n".join(
-        f"{m['role'].upper()}:\n{m['content']}" for m in history[-12:]
+    transcript = history_transcript(history)
+    agent_context = (
+        f"Target agent: {agent.get('id')}\n"
+        f"Agent role: {agent.get('role') or 'local Codex'}\n"
+        f"Agent host: {agent.get('host') or 'local'}\n\n"
     )
     prompt = (
         "You are Codex in Kurage Agent Deck. Answer in Japanese unless the user asks otherwise.\n"
-        "Continue the conversation below and act on the selected workspace when needed.\n\n"
+        "Continue the conversation below and act on the selected workspace when needed.\n"
+        "The conversation block is persisted chat history from this deck. Use it as context when answering.\n\n"
+        + agent_context
         + (transcript + "\n\n" if transcript else "")
         + "USER:\n"
         + user_prompt
     )
     history.append({"role": "user", "content": user_prompt})
     CHAT_META.setdefault(thread_id, {})["execution_mode"] = execution_mode
-    save_thread(thread_id, str(cwd), model)
-    result = run_codex_exec(cwd, model, prompt, job_id, execution_mode)
+    CHAT_META.setdefault(thread_id, {})["target_agent"] = target_agent
+    save_thread(thread_id, str(cwd), model, target_agent)
+    if agent.get("kind") == "local":
+        result = run_codex_exec(cwd, model, prompt, job_id, execution_mode)
+    else:
+        remote_req = ChatRequest(
+            prompt=prompt,
+            cwd=str(cwd),
+            thread_id=thread_id,
+            model=model,
+            execution_mode=execution_mode,
+            target_agent=target_agent,
+        )
+        result = run_remote_agent(agent, remote_req, thread_id, job_id)
     assistant_text = result["text"] or "(no response)"
     history.append({"role": "assistant", "content": assistant_text})
-    save_thread(thread_id, str(cwd), model)
+    save_thread(thread_id, str(cwd), model, target_agent)
     return {
         "ok": result["returncode"] == 0,
         "thread_id": thread_id,
         "model": model,
         "execution_mode": execution_mode,
         "sandbox": sandbox,
+        "target_agent": target_agent,
+        "agent_role": agent.get("role") or "",
         "cwd": str(cwd),
         "message": assistant_text,
         "stderr_tail": result["stderr_tail"],
+        "remote_job": result.get("remote_job") or {},
     }
 
 
@@ -563,6 +877,7 @@ def chat_thread(thread_id: str) -> dict[str, Any]:
             "cwd": meta.get("cwd") or "",
             "model": meta.get("model") or "",
             "execution_mode": meta.get("execution_mode") or DEFAULT_EXECUTION_MODE,
+            "target_agent": meta.get("target_agent") or "local",
             "created": meta.get("created") or 0,
             "updated": meta.get("updated") or 0,
             "messages": messages,

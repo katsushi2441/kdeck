@@ -15,6 +15,8 @@ Kurage Agent Deck は、スマホやブラウザから Linux サーバ上の Cod
 
 Kurage Agent Deck 自体が LLM ではありません。ユーザー認証、ワークスペース選択、API 中継、ジョブ管理、音声 UI を担当し、実際の推論やコード作業は Codex CLI に委譲します。
 
+マルチサーバ PoC では、`192.168.0.3` の kdeck を統合管理サーバにし、`192.168.0.2` を Hermes スケジューラ担当、`192.168.0.14` を AIxEC API server 担当、`192.168.0.11` を Hyperframes 動画生成担当として扱います。Web UI は `target_agent` を指定してタスクを投入し、kdeck 側にタスク履歴と短い共有要約を保存します。
+
 ## 主要コンポーネント
 
 `web/kdeck.php` は、Web 画面と API プロキシを兼ねています。ブラウザは FastAPI に直接アクセスせず、PHP に対して `?api=chat` や `?api=chat_job` を呼び出します。PHP 側で `KDECK_TOKEN` を付けて FastAPI に中継するため、API トークンをブラウザへ露出しにくい構造です。
@@ -41,7 +43,9 @@ codex exec --json -m <model> --cd <cwd> --sandbox workspace-write -
 7. 結果をチャット画面に表示する
 ```
 
-会話履歴は `CHAT_THREADS` というプロセスメモリ上の辞書に保存されます。そのため、API プロセスを再起動するとアクティブな会話履歴やジョブは消えます。これは MVP としての割り切りであり、永続化が必要になった場合は SQLite や PostgreSQL などに移す余地があります。
+会話履歴は `KDECK_DATA_DIR/chat_threads` 配下の JSON ファイルに保存されます。Web UI は保存された履歴一覧から過去の会話を開き直せます。また、同じスレッドで送信した場合は、保存済み履歴の直近部分を Codex へのプロンプトに含めるため、後続ターンで過去の文脈を参照できます。
+
+ジョブ状態と PTY セッションは `CHAT_JOBS` や `SESSIONS` などのプロセスメモリ上の辞書で管理されます。そのため、API プロセスを再起動すると実行中ジョブやアクティブな端末セッションは消えますが、保存済みチャット履歴は残ります。
 
 ## ワークスペース制御
 

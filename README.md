@@ -24,9 +24,11 @@ Smartphone browser
 
 The PHP page keeps the API token on the web server side. The browser talks to PHP, not directly to FastAPI.
 The MVP stores sessions in API process memory, so active sessions disappear when `kdeck-api` restarts.
-Chat threads are saved under `KDECK_DATA_DIR` so the web UI can reopen recent Codex conversations.
+Chat threads are saved under `KDECK_DATA_DIR` so the web UI and later Codex turns can reopen and reference recent conversations.
+The multi-server PoC adds a `target_agent` selector so kdeck can keep task history for local and remote agent gateways.
 
 See [Kurage Agent Deck の技術解説](docs/kurage-agent-deck-technical-overview.md) for a Japanese technical overview.
+See [kdeck Multi-Server Agent Plan](docs/multi-server-agent-plan.md) for the 192.168.0.3 / .2 / .14 / .11 agent layout.
 
 ## Setup
 
@@ -64,6 +66,14 @@ Set `KDECK_DEFAULT_EXECUTION_MODE=confirm` to keep the safer mode selected by de
 - `POST /api/sessions/{id}/send`
 - `POST /api/sessions/{id}/interrupt`
 - `POST /api/sessions/{id}/terminate`
+- `POST /api/chat`
+- `GET /api/chat/{job_id}`
+- `POST /api/chat/{job_id}/cancel`
+- `GET /api/chat_threads`
+- `GET /api/chat_threads/{thread_id}`
+- `GET /api/agents`
+- `GET /api/agent_tasks`
+- `GET /api/shared_memory`
 
 ## Security
 
