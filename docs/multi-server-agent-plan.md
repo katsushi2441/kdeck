@@ -15,10 +15,16 @@ kdeck does not talk directly to per-server HTTP agent gateways.
 
 ## Current State
 
-- SwarmClaw runs on `192.168.0.3` at `127.0.0.1:3456`.
+- kdeck API runs on `192.168.0.3` as `kdeck-api.service` and listens on port `18301`.
+- `192.168.0.2` has an OpenClaw gateway profile registered as `openclaw-192-168-0-2`.
 - `192.168.0.14` has an OpenClaw gateway profile registered as `openclaw-192-168-0-14`.
-- The `.14` OpenClaw gateway is LAN-bound on port `18789` with token authentication.
-- kdeck should keep `target_agent` in chat/task history, but routing should go through SwarmClaw gateway profiles.
+- `192.168.0.11` has an OpenClaw gateway profile registered as `openclaw-192-168-0-11`.
+- The `.2`, `.14`, and `.11` OpenClaw gateways are LAN-bound on port `18789` with token authentication.
+- kdeck keeps `target_agent` in chat/task history, and remote routing goes through OpenClaw gateway profiles.
+- Verified remote backends:
+  - `.2`: `codex-cli` and `claude-cli`
+  - `.14`: `codex-cli` and `claude-cli`
+  - `.11`: `codex-cli` and `claude-cli`
 
 ## Rules
 
