@@ -70,10 +70,13 @@ def command_brief(_args: argparse.Namespace) -> None:
                 blocked_reason = "running"
             elif not controller.cooldown_ready(goal):
                 blocked_reason = "cooldown"
+            display_status = str(goal.get("status") or "")
+            if not blocked_reason and display_status == "complete_today":
+                display_status = "waiting"
             brief_goal = {
                 "goal_name": goal["goal_name"],
                 "priority": goal["priority"],
-                "status": goal["status"],
+                "status": display_status,
                 "eligible": not blocked_reason,
                 "blocked_reason": blocked_reason,
                 "today_items": totals["items"],
