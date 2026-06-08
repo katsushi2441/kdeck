@@ -188,6 +188,7 @@ $execution_modes = !empty($config['execution_modes']) && is_array($config['execu
     ? $config['execution_modes']
     : [
         'chat-only' => ['label' => 'Chat only', 'sandbox' => 'read-only'],
+        'research' => ['label' => 'Research', 'sandbox' => 'read-only'],
         'confirm' => ['label' => '確認して実行', 'sandbox' => 'workspace-write'],
         'full-access' => ['label' => 'Full access', 'sandbox' => 'danger-full-access'],
     ];
@@ -750,8 +751,8 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  if(executionMode === 'chat-only'){
 	    pending = addBubble('assistant', '考えています...');
 	  } else {
-	    addBubble('assistant', executionMode === 'full-access' ? '了解しました。これから実行します。' : '了解しました。確認しながら進めます。');
-	    pending = addBubble('assistant', '実行中...');
+	    addBubble('assistant', executionMode === 'full-access' ? '了解しました。これから実行します。' : (executionMode === 'research' ? '了解しました。調査します。' : '了解しました。確認しながら進めます。'));
+	    pending = addBubble('assistant', executionMode === 'research' ? '調査中...' : '実行中...');
 	  }
 	  localStorage.setItem('kdeck.folder', folderSelect.value);
 	  localStorage.setItem('kdeck.localFolder', localFolderSelect.value);
@@ -801,8 +802,8 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	    }
 	    if(job.status === 'running'){
 	      const elapsed = Number(job.elapsed || 0);
-	      pending.firstChild.textContent = job.execution_mode === 'chat-only' ? '考えています...' : '実行中...';
-	      const modeLabel = job.execution_mode === 'chat-only' ? 'Chat only' : (job.execution_mode === 'full-access' ? 'Full access' : '確認');
+	      pending.firstChild.textContent = job.execution_mode === 'chat-only' ? '考えています...' : (job.execution_mode === 'research' ? '調査中...' : '実行中...');
+	      const modeLabel = job.execution_mode === 'chat-only' ? 'Chat only' : (job.execution_mode === 'research' ? 'Research' : (job.execution_mode === 'full-access' ? 'Full access' : '確認'));
 	      runControls.status.textContent = `${modeLabel} / ${job.sandbox || sandbox || ''} / ${elapsed ? `経過 ${elapsed}秒` : `確認中 ${pollCount}`}`;
 	      setTimeout(pollChat, 1500);
 	      return;

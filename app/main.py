@@ -71,6 +71,11 @@ CODEX_EXECUTION_MODES = {
         "sandbox": "read-only",
         "description": "議論だけを行い、コマンド実行・ファイル変更・外部操作はしません。",
     },
+    "research": {
+        "label": "Research",
+        "sandbox": "read-only",
+        "description": "検索・調査・URL確認だけを行い、コマンド実行・ファイル変更・投稿はしません。",
+    },
     "confirm": {
         "label": "確認して実行",
         "sandbox": "workspace-write",
@@ -646,6 +651,14 @@ def execution_mode_instruction(execution_mode: str) -> str:
             "do not access external services, and do not claim you changed anything. "
             "If the user asks for implementation, explain what you would do and ask them to switch execution mode.\n\n"
         )
+    if execution_mode == "research":
+        return (
+            "Execution mode: research.\n"
+            "You may browse the web, search external sources, open URLs, and verify public read-only information. "
+            "Do not run shell commands, do not edit files, do not make commits, do not deploy, "
+            "and do not create, update, delete, post, upload, or otherwise mutate external services. "
+            "If the user asks for implementation or posting, explain that they should switch execution mode.\n\n"
+        )
     if execution_mode == "full-access":
         return (
             "Execution mode: full-access.\n"
@@ -664,6 +677,8 @@ def execution_ack_message(execution_mode: str) -> str:
         return "了解しました。これから実行します。"
     if execution_mode == "confirm":
         return "了解しました。確認しながら進めます。"
+    if execution_mode == "research":
+        return "了解しました。調査します。"
     return ""
 
 
