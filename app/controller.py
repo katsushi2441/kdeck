@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
+import re
 import sqlite3
 import urllib.error
 import urllib.parse
@@ -55,6 +56,178 @@ MARKET_TASKS = [
         "target_count": 500,
         "description_policy": "経営者・個人事業主が購入検討しやすい高単価商品を優先する",
         "reason": "kdeck goal queue retry market-pipeline task",
+    },
+    {
+        "label": "防犯・見守りカメラ",
+        "group": "security_cameras",
+        "genre_id": "",
+        "keywords": [
+            "防犯カメラ 屋外", "防犯カメラ ワイヤレス", "防犯カメラ PoE", "防犯カメラ ソーラー",
+            "監視カメラ 屋外 防水", "ネットワークカメラ 屋外", "見守りカメラ", "ペットカメラ",
+            "ベビーモニター カメラ", "防犯カメラセット", "録画機 防犯カメラ", "ドアホン カメラ",
+            "スマートロック カメラ", "人感センサー カメラ", "暗視カメラ 屋外", "4K 防犯カメラ",
+            "防犯ライト カメラ", "屋外カメラ wifi", "防犯カメラ 工事不要", "AI検知 防犯カメラ",
+        ],
+        "exclude_keywords": ["中古", "ジャンク"],
+        "target_count": 500,
+        "description_policy": "防犯・店舗管理・見守り用途で比較しやすい商品を優先する",
+        "reason": "expanded market-pipeline discovery task",
+    },
+    {
+        "label": "成分美容・スキンケア",
+        "group": "ingredient_skincare",
+        "genre_id": "",
+        "keywords": [
+            "レチノール 美容液", "ナイアシンアミド 美容液", "ビタミンC 美容液", "セラミド 化粧水",
+            "ヒアルロン酸 美容液", "CICA スキンケア", "アゼライン酸 美容液", "ペプチド 美容液",
+            "グルタチオン 美容液", "敏感肌 スキンケア", "毛穴 美容液", "保湿クリーム セラミド",
+            "日焼け止め 敏感肌", "クレンジングバーム", "フェイスパック 大容量", "導入美容液",
+            "美容液 ランキング", "韓国コスメ 美容液", "エイジングケア クリーム", "シートマスク 大容量",
+        ],
+        "exclude_keywords": ["中古", "ジャンク", "サンプル", "お試し"],
+        "target_count": 500,
+        "description_policy": "成分比較・悩み別選び方の記事化に向いた美容商品を優先する",
+        "reason": "expanded market-pipeline discovery task",
+    },
+    {
+        "label": "健康管理・サプリ",
+        "group": "health_supplements",
+        "genre_id": "",
+        "keywords": [
+            "プロテイン 1kg", "プロテイン 3kg", "ホエイプロテイン", "ソイプロテイン",
+            "ビタミンD サプリ", "マルチビタミン", "亜鉛 サプリ", "鉄分 サプリ",
+            "乳酸菌 サプリ", "オメガ3 サプリ", "DHA EPA サプリ", "NMN サプリ",
+            "クレアチン", "EAA", "BCAA", "食物繊維 サプリ", "青汁", "睡眠 サプリ",
+            "血圧計 オムロン", "体組成計 タニタ", "スマートウォッチ 健康管理",
+        ],
+        "exclude_keywords": ["中古", "ジャンク", "お試し"],
+        "target_count": 500,
+        "description_policy": "健康管理・継続購入・比較需要がある商品を優先する",
+        "reason": "expanded market-pipeline discovery task",
+    },
+    {
+        "label": "キッチン・時短家電",
+        "group": "kitchen_tools",
+        "genre_id": "",
+        "keywords": [
+            "電気圧力鍋", "ノンフライヤー", "ホットクック", "低温調理器", "炊飯器 5合",
+            "コーヒーメーカー 全自動", "エスプレッソマシン", "食洗機 工事不要", "浄水器 カートリッジ",
+            "ブレンダー", "フードプロセッサー", "ホットプレート", "トースター 高級",
+            "フライパン IH", "鍋 セット", "包丁 三徳", "まな板 抗菌", "保存容器 耐熱",
+            "真空保存容器", "キッチンスケール",
+        ],
+        "exclude_keywords": ["中古", "ジャンク"],
+        "target_count": 500,
+        "description_policy": "時短・家事効率化・比較記事に向いたキッチン商品を優先する",
+        "reason": "expanded market-pipeline discovery task",
+    },
+    {
+        "label": "ペット用品・自動化",
+        "group": "pet_supplies",
+        "genre_id": "",
+        "keywords": [
+            "ペットシーツ まとめ買い", "猫砂 まとめ買い", "ドッグフード 大容量", "キャットフード 大容量",
+            "自動給餌器", "ペットカメラ", "自動給水器 ペット", "猫 自動トイレ",
+            "犬 ハーネス", "猫 爪とぎ", "ペット 消臭", "ペット ブラシ",
+            "ペット キャリー", "犬 おやつ", "猫 おやつ", "ペット トイレ",
+            "ペット ドライヤー", "ペット バリカン", "ペット 暑さ対策", "ペット 見守り",
+        ],
+        "exclude_keywords": ["中古", "ジャンク"],
+        "target_count": 500,
+        "description_policy": "定期購入・自動化・見守り需要があるペット用品を優先する",
+        "reason": "expanded market-pipeline discovery task",
+    },
+    {
+        "label": "アウトドア・防災用品",
+        "group": "outdoor_disaster",
+        "genre_id": "",
+        "keywords": [
+            "ポータブル電源", "ソーラーパネル ポータブル電源", "防災セット", "非常食 セット",
+            "保存水", "キャンプ テント", "キャンプ チェア", "アウトドア テーブル",
+            "寝袋", "クーラーボックス", "LED ランタン", "焚き火台", "タープ",
+            "アウトドア ワゴン", "防災 ラジオ", "簡易トイレ 防災", "モバイルバッテリー 大容量",
+            "空調服", "冷感 ベスト", "熱中症対策 グッズ",
+        ],
+        "exclude_keywords": ["中古", "ジャンク", "ふるさと納税"],
+        "target_count": 500,
+        "description_policy": "季節需要・防災需要・高単価商品を優先する",
+        "reason": "expanded market-pipeline discovery task",
+    },
+    {
+        "label": "日用品・消耗品まとめ買い",
+        "group": "daily_consumables",
+        "genre_id": "",
+        "keywords": [
+            "洗濯洗剤 詰め替え 大容量", "柔軟剤 詰め替え 大容量", "食器用洗剤 詰め替え 大容量",
+            "キッチンペーパー まとめ買い", "トイレットペーパー まとめ買い", "ティッシュペーパー まとめ買い",
+            "除菌シート まとめ買い", "マスク まとめ買い", "歯ブラシ まとめ買い", "歯磨き粉 まとめ買い",
+            "ゴミ袋 45L まとめ買い", "紙おむつ まとめ買い", "ペットボトル 水 まとめ買い",
+            "炭酸水 まとめ買い", "コーヒー ドリップ まとめ買い", "レトルト食品 まとめ買い",
+        ],
+        "exclude_keywords": ["中古", "ジャンク", "ふるさと納税"],
+        "target_count": 500,
+        "description_policy": "Amazon送客にもつながりやすい日用品・消耗品を優先する",
+        "reason": "expanded market-pipeline discovery task",
+    },
+    {
+        "label": "スマートホーム・IoT",
+        "group": "smart_home_iot",
+        "genre_id": "",
+        "keywords": [
+            "スマートロック", "スマートリモコン", "スマートプラグ", "スマート電球",
+            "SwitchBot", "Nature Remo", "Alexa 対応", "Google Home 対応",
+            "ロボット掃除機", "スマートカーテン", "温湿度計 スマート", "CO2センサー",
+            "見守りセンサー", "人感センサー", "スマートスピーカー", "スマートホーム セット",
+        ],
+        "exclude_keywords": ["中古", "ジャンク"],
+        "target_count": 500,
+        "description_policy": "スマートホーム化・省力化の文脈で紹介しやすい商品を優先する",
+        "reason": "expanded market-pipeline discovery task",
+    },
+    {
+        "label": "カー用品・車載ガジェット",
+        "group": "car_gadgets",
+        "genre_id": "",
+        "keywords": [
+            "ドライブレコーダー 前後", "ドライブレコーダー ミラー型", "車載 冷蔵庫", "ポータブルナビ",
+            "ジャンプスターター", "車載充電器 USB-C", "タイヤ 空気圧センサー", "カーナビ",
+            "ETC2.0 車載器", "車載ホルダー magsafe", "洗車 高圧洗浄機", "コーティング剤 車",
+            "レーダー探知機", "バックカメラ", "車中泊 マット", "車中泊 ポータブル電源",
+        ],
+        "exclude_keywords": ["中古", "ジャンク"],
+        "target_count": 500,
+        "description_policy": "車載ガジェット・安全・車中泊需要に向く商品を優先する",
+        "reason": "expanded market-pipeline discovery task",
+    },
+    {
+        "label": "学習・資格・教育ガジェット",
+        "group": "learning_tools",
+        "genre_id": "",
+        "keywords": [
+            "電子辞書", "語学 学習 タブレット", "ペンタブレット", "液タブ", "デジタルノート",
+            "電子メモパッド", "英語教材", "プログラミング 学習 キット", "ロボット プログラミング",
+            "知育 タブレット", "タイピング キーボード", "オンライン授業 マイク", "Webカメラ 4K",
+            "ノイズキャンセリング ヘッドホン", "学習机 昇降", "デスクライト 目に優しい",
+        ],
+        "exclude_keywords": ["中古", "ジャンク"],
+        "target_count": 500,
+        "description_policy": "学習効率化・資格・教育DXの切り口で紹介しやすい商品を優先する",
+        "reason": "expanded market-pipeline discovery task",
+    },
+    {
+        "label": "トレカ・ホビー高回転",
+        "group": "trading_cards_hobby",
+        "genre_id": "207659",
+        "keywords": [
+            "ポケモンカード BOX", "ポケモンカード シングル", "ポケモンカード SAR",
+            "ポケモンカード UR", "ポケモンカード リザードン", "遊戯王 シングルカード",
+            "遊戯王 BOX", "ワンピースカード BOX", "ワンピースカード シングル",
+            "デュエルマスターズ BOX", "マジックザギャザリング", "トレーディングカード 高額",
+        ],
+        "exclude_keywords": ["中古", "ジャンク", "オリパ"],
+        "target_count": 500,
+        "description_policy": "回転が早いランキング商品を優先し、相場・人気カード文脈で紹介する",
+        "reason": "expanded market-pipeline discovery task",
     },
 ]
 
@@ -533,10 +706,89 @@ def evaluate_job(job: dict[str, Any], goal: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def market_task_for_attempt(attempt: int) -> dict[str, Any]:
-    task = dict(MARKET_TASKS[attempt % len(MARKET_TASKS)])
+def _market_group_from_run_result(raw: str) -> str:
+    try:
+        detail = json.loads(raw or "{}")
+    except Exception:
+        detail = {}
+    candidates: list[Any] = [
+        _nested_dict(detail, "job", "kwargs", "task").get("group"),
+        _nested_dict(detail, "job", "result", "task").get("group"),
+        _nested_dict(detail, "job", "result", "submit", "response", "result").get("group"),
+    ]
+    description = str(_nested_dict(detail, "job").get("description") or "")
+    match = re.search(r"'group': '([^']+)'", description)
+    if match:
+        candidates.append(match.group(1))
+    for value in candidates:
+        if value:
+            return str(value)
+    return ""
+
+
+def _market_group_stats(conn: sqlite3.Connection, goal_id: int) -> dict[str, dict[str, Any]]:
+    stats: dict[str, dict[str, Any]] = {}
+    rows = conn.execute(
+        """
+        SELECT result, items, business_status, finished_at
+        FROM goal_runs
+        WHERE goal_id = ? AND day = ?
+        ORDER BY id
+        """,
+        (goal_id, today_key()),
+    ).fetchall()
+    for row in rows:
+        group = _market_group_from_run_result(str(row["result"] or ""))
+        if not group:
+            continue
+        entry = stats.setdefault(group, {"runs": 0, "created": 0, "failures": 0, "latest_created": 0, "latest_status": ""})
+        created = int(row["items"] or 0)
+        entry["runs"] += 1
+        entry["created"] += created
+        entry["latest_created"] = created
+        entry["latest_status"] = str(row["business_status"] or "")
+        if str(row["business_status"] or "") == "failed":
+            entry["failures"] += 1
+    return stats
+
+
+def market_task_for_attempt(conn: sqlite3.Connection, goal_id: int, attempt: int) -> dict[str, Any]:
+    stats = _market_group_stats(conn, goal_id)
+    best_score = -10**9
+    selected_index = attempt % len(MARKET_TASKS)
+    for index, task in enumerate(MARKET_TASKS):
+        group = str(task.get("group") or "")
+        entry = stats.get(group, {})
+        runs = int(entry.get("runs") or 0)
+        created = int(entry.get("created") or 0)
+        latest_created = int(entry.get("latest_created") or 0)
+        failures = int(entry.get("failures") or 0)
+        score = 1000 - runs * 180 - failures * 260
+        if runs == 0:
+            score += 800
+        if latest_created >= 100:
+            score += 550
+        elif runs >= 2 and created < 30:
+            score -= 1200
+        elif runs >= 1 and latest_created < 10:
+            score -= 350
+        score += min(created, 300)
+        # Keep deterministic variety among equal-ish choices.
+        score -= abs((attempt % len(MARKET_TASKS)) - index) * 2
+        if score > best_score:
+            best_score = score
+            selected_index = index
+
+    task = dict(MARKET_TASKS[selected_index])
+    group = str(task.get("group") or "")
+    entry = stats.get(group, {})
     task["target_count"] = 500
-    task["reason"] = f"{task.get('reason', '')}; attempt={attempt + 1}"
+    task["reason"] = (
+        f"{task.get('reason', '')}; attempt={attempt + 1}; "
+        f"adaptive_stats group={group} runs={int(entry.get('runs') or 0)} "
+        f"created={int(entry.get('created') or 0)} latest_created={int(entry.get('latest_created') or 0)}; "
+        "low-created groups are skipped and high-created groups are deepened"
+    )
     return task
 
 
@@ -550,7 +802,7 @@ def enqueue_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> dict[str, An
         (goal["id"], today),
     ).fetchone()["c"]
     if goal["goal_name"] == "aixec-market-pipeline":
-        kwargs["task"] = market_task_for_attempt(int(run_count or 0))
+        kwargs["task"] = market_task_for_attempt(conn, int(goal["id"]), int(run_count or 0))
         kwargs["target_count"] = int(goal.get("per_run_target") or 500)
         kwargs["limit"] = int(goal.get("per_run_target") or 500)
     request = {
