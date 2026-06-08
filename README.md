@@ -191,8 +191,8 @@ Hermes enqueue schedules on `192.168.0.2`.
 
 The first production goal is `aixec-market-pipeline`:
 
-- per-run target: 500 newly registered/updated market items
-- daily target: 2000 items
+- per-run target: 500 newly created market items
+- daily target: 4000 newly created items, equivalent to 500 x 8 successful runs
 - maximum runs per day: effectively unlimited; it keeps running until the daily target is met
 - resource lock: `ollama:192.168.0.14:gemma4:e4b`
 - cooldown: 900 seconds between attempts

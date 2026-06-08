@@ -236,11 +236,11 @@ DEFAULT_GOALS = [
     {
         "goal_name": "aixec-market-pipeline",
         "worker_name": "aixec-market-pipeline-enqueue",
-        "description": "AIxEC market-pipeline 新規2000件/日を達成するまで継続",
+        "description": "AIxEC market-pipeline 新規4000件/日を達成するまで継続",
         "function_name": "aixec_market_jobs.market_pipeline_job",
         "queue": "auto",
         "resource": "ollama:192.168.0.14:gemma4:e4b",
-        "daily_target": 2000,
+        "daily_target": 4000,
         "per_run_target": 500,
         "max_runs_per_day": 999,
         "cooldown_seconds": DEFAULT_COOLDOWN_SECONDS,
