@@ -312,6 +312,8 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
         "gateway_id": "openclaw-192-168-0-11",
         "folder_base": "/home/kojima/exdirect",
         "project_folders": project_folders_under("/home/kojima/exdirect", [
+            "hyperframes",
+            "remotion",
             "horizon",
             "airadio-scripted-mv",
             "kurage",
