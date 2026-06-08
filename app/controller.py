@@ -467,16 +467,44 @@ def extract_result(job: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
-def job_items(job: dict[str, Any], result: dict[str, Any]) -> int:
+def _int_value(value: Any) -> int | None:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _nested_dict(source: dict[str, Any], *keys: str) -> dict[str, Any]:
+    current: Any = source
+    for key in keys:
+        if not isinstance(current, dict):
+            return {}
+        current = current.get(key)
+    return current if isinstance(current, dict) else {}
+
+
+def job_items(job: dict[str, Any], result: dict[str, Any], goal: dict[str, Any] | None = None) -> int:
+    if goal and goal.get("goal_name") == "aixec-market-pipeline":
+        # market-pipeline's goal is new product creation. Registered/selected
+        # includes updates, so counting it makes "new 500" look complete when
+        # nothing new was created.
+        sources = (
+            result.get("metrics") if isinstance(result.get("metrics"), dict) else {},
+            _nested_dict(result, "submit", "response", "result"),
+            result,
+        )
+        for source in sources:
+            value = _int_value(source.get("created") if isinstance(source, dict) else None)
+            if value is not None:
+                return value
+        return 0
     for source in (result, result.get("metrics") if isinstance(result.get("metrics"), dict) else {}, job.get("lifecycle") or {}):
         if not isinstance(source, dict):
             continue
         for key in ("items", "created", "registered", "selected"):
-            value = source.get(key)
-            try:
-                return int(value or 0)
-            except (TypeError, ValueError):
-                continue
+            value = _int_value(source.get(key))
+            if value is not None:
+                return value
     return 0
 
 
@@ -485,7 +513,7 @@ def evaluate_job(job: dict[str, Any], goal: dict[str, Any]) -> dict[str, Any]:
     lifecycle = job.get("lifecycle") if isinstance(job.get("lifecycle"), dict) else {}
     result = extract_result(job)
     result_status = str(result.get("status") or lifecycle.get("state") or rq_status).lower()
-    items = job_items(job, result)
+    items = job_items(job, result, goal)
     terminal = bool(lifecycle.get("terminal", rq_status in {"finished", "failed", "stopped", "canceled"}))
     note = str(result.get("note") or lifecycle.get("note") or "")
     if rq_status in {"queued", "started", "deferred", "scheduled"} or not terminal:
