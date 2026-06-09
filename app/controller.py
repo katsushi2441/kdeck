@@ -329,14 +329,14 @@ DEFAULT_GOALS = [
     {
         "goal_name": "horizon-worker",
         "worker_name": "horizon-worker-enqueue",
-        "description": "Horizonの記事・動画・YouTube投稿・AIxSNS告知",
+        "description": "Horizonの記事・動画・はてな/Bloggerメール投稿・AIxSNS告知を6時間ごとに1日4回実行",
         "function_name": "horizon_jobs.worker_auto_cycle_job",
         "queue": "auto",
         "resource": "ollama:192.168.0.14:gemma4:e4b",
-        "daily_target": 1,
+        "daily_target": 4,
         "per_run_target": 1,
-        "max_runs_per_day": 3,
-        "cooldown_seconds": 1800,
+        "max_runs_per_day": 4,
+        "cooldown_seconds": 21600,
         "priority": 40,
         "enabled": 1,
         "payload": {
