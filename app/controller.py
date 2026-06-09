@@ -413,14 +413,14 @@ DEFAULT_GOALS = [
     {
         "goal_name": "buzblogger",
         "worker_name": "buzblogger-enqueue",
-        "description": "buzblogger記事生成・投稿",
+        "description": "buzblogger記事生成・投稿を4時間ごとに1日6回実行",
         "function_name": "buzblogger_jobs.worker_auto_cycle_job",
         "queue": "auto",
         "resource": "claude",
-        "daily_target": 4,
+        "daily_target": 6,
         "per_run_target": 1,
-        "max_runs_per_day": 4,
-        "cooldown_seconds": 1800,
+        "max_runs_per_day": 6,
+        "cooldown_seconds": 14400,
         "priority": 80,
         "enabled": 1,
         "payload": {
