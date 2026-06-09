@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import json
+import re
 from ftplib import FTP
 from pathlib import Path
 
@@ -27,6 +28,23 @@ def load_env(path: Path) -> None:
         key = key.strip()
         value = value.strip().strip("\"'")
         os.environ.setdefault(key, value)
+
+
+def load_legacy_ftp_helper(path: Path) -> None:
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    mapping = {
+        "FTP_HOST": "HETEML_FTP_HOST",
+        "FTP_USER": "HETEML_FTP_USER",
+        "FTP_PASS": "HETEML_FTP_PASS",
+    }
+    for legacy_key, env_key in mapping.items():
+        if os.environ.get(env_key):
+            continue
+        match = re.search(rf"^{legacy_key}\s*=\s*(['\"])(.*?)\1", text, re.MULTILINE)
+        if match:
+            os.environ[env_key] = match.group(2)
 
 
 def connect() -> FTP:
@@ -78,7 +96,10 @@ def upload_config(ftp: FTP) -> None:
 
 
 def main() -> None:
+    load_env(Path.home() / ".env")
+    load_env(Path.home() / ".hermes" / ".env")
     load_env(ROOT / ".env")
+    load_legacy_ftp_helper(Path.home() / "work" / "url2ai" / "src" / "ftpphp.py")
     ftp = connect()
     try:
         ensure_cwd(ftp, REMOTE_DIRS)

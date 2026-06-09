@@ -624,6 +624,127 @@ def daily_totals(conn: sqlite3.Connection, goal_id: int, day: str) -> dict[str, 
     return {"runs": int(row["runs"] or 0), "items": int(row["items"] or 0)}
 
 
+def parse_iso_datetime(value: Any) -> dt.datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def last_goal_run(conn: sqlite3.Connection, goal_id: int) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT *
+        FROM goal_runs
+        WHERE goal_id = ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (goal_id,),
+    ).fetchone()
+    return row_dict(row)
+
+
+def enrich_goal_for_status(goal: dict[str, Any], totals: dict[str, int], last_run: dict[str, Any], now: dt.datetime) -> dict[str, Any]:
+    status_value = str(goal.get("status") or "waiting")
+    target = int(goal.get("daily_target") or 0)
+    max_runs = int(goal.get("max_runs_per_day") or 0)
+    remaining_items = max(0, target - int(totals.get("items") or 0))
+    remaining_runs = max(0, max_runs - int(totals.get("runs") or 0))
+    cooldown_until = parse_iso_datetime(goal.get("cooldown_until"))
+    cooldown_remaining = 0
+    if cooldown_until:
+        cooldown_remaining = max(0, int((cooldown_until - now).total_seconds()))
+
+    next_eligible_at = ""
+    next_action = "待機"
+    next_reason = ""
+    if status_value == "running":
+        next_action = "実行中"
+        next_reason = "RQDB4AIジョブの完了待ち"
+    elif status_value == "hold":
+        next_action = "保留"
+        next_reason = str(goal.get("last_note") or "手動で保留中")
+    elif status_value == "complete_today":
+        next_action = "本日完了"
+        next_reason = "翌日のGoal Queueで再び実行候補になります"
+    elif cooldown_remaining > 0:
+        next_eligible_at = cooldown_until.isoformat() if cooldown_until else ""
+        next_action = "冷却中"
+        next_reason = f"{cooldown_remaining}秒後に実行候補"
+    else:
+        next_eligible_at = now.isoformat()
+        next_action = "次回tickで実行候補"
+        if status_value == "cooldown":
+            next_reason = "冷却は終了済み"
+        else:
+            next_reason = "待機中"
+
+    enriched = dict(goal)
+    enriched["today"] = {
+        **totals,
+        "remaining_items": remaining_items,
+        "remaining_runs": remaining_runs,
+    }
+    enriched["last_run"] = last_run
+    enriched["last_job_id"] = str(last_run.get("job_id") or goal.get("current_job_id") or "")
+    enriched["last_rq_status"] = str(last_run.get("rq_status") or "")
+    enriched["last_business_status"] = str(last_run.get("business_status") or "")
+    enriched["last_items"] = int(last_run.get("items") or 0)
+    enriched["last_started_at"] = str(last_run.get("started_at") or "")
+    enriched["last_finished_at"] = str(last_run.get("finished_at") or "")
+    enriched["last_run_note"] = str(last_run.get("note") or "")
+    enriched["cooldown_remaining_seconds"] = cooldown_remaining
+    enriched["is_cooling_down"] = cooldown_remaining > 0
+    enriched["next_eligible_at"] = next_eligible_at
+    enriched["next_action"] = next_action
+    enriched["next_reason"] = next_reason
+    return enriched
+
+
+def build_status_summary(goals: list[dict[str, Any]], rq_summary: dict[str, Any]) -> dict[str, Any]:
+    live = rq_summary.get("totals", {}).get("live", {}) if isinstance(rq_summary, dict) else {}
+    summary: dict[str, Any] = {
+        "total_goals": len(goals),
+        "waiting": 0,
+        "running": 0,
+        "cooldown": 0,
+        "cooling_down": 0,
+        "cooldown_ready": 0,
+        "complete_today": 0,
+        "hold": 0,
+        "rq_waiting": int(live.get("queued") or 0),
+        "rq_running": int(live.get("started") or 0),
+        "rq_live": int(live.get("queued") or 0) + int(live.get("started") or 0),
+        "next_goal_name": "",
+        "next_eligible_at": "",
+        "next_action": "",
+    }
+    next_candidates: list[tuple[str, str, str]] = []
+    for goal in goals:
+        status_value = str(goal.get("status") or "waiting")
+        if status_value in summary:
+            summary[status_value] += 1
+        if goal.get("is_cooling_down"):
+            summary["cooling_down"] += 1
+        elif status_value == "cooldown":
+            summary["cooldown_ready"] += 1
+        if goal.get("next_eligible_at"):
+            next_candidates.append((str(goal["next_eligible_at"]), str(goal.get("goal_name") or ""), str(goal.get("next_action") or "")))
+    if next_candidates:
+        next_at, goal_name, action = sorted(next_candidates)[0]
+        summary["next_goal_name"] = goal_name
+        summary["next_eligible_at"] = next_at
+        summary["next_action"] = action
+    return summary
+
+
 def extract_result(job: dict[str, Any]) -> dict[str, Any]:
     result = job.get("result")
     if isinstance(result, dict):
@@ -912,21 +1033,26 @@ def cooldown_ready(goal: dict[str, Any]) -> bool:
 
 def status() -> dict[str, Any]:
     init_db()
+    rq_summary = rq_get("/api/summary", timeout=12) if RQDB4AI_API_TOKEN else {"ok": False, "error": "RQDB4AI token is not configured"}
     with connect() as conn:
+        for row in conn.execute("SELECT * FROM goals WHERE status = 'running' ORDER BY priority, id").fetchall():
+            refresh_running_goal(conn, row_dict(row))
         day = today_key()
+        now = dt.datetime.now(dt.timezone.utc)
         goals = []
         for row in conn.execute("SELECT * FROM goals ORDER BY priority, id").fetchall():
             goal = row_dict(row)
-            goal["today"] = daily_totals(conn, int(goal["id"]), day)
-            goals.append(goal)
+            totals = daily_totals(conn, int(goal["id"]), day)
+            latest = last_goal_run(conn, int(goal["id"]))
+            goals.append(enrich_goal_for_status(goal, totals, latest, now))
         events = [row_dict(row) for row in conn.execute("SELECT * FROM controller_events ORDER BY id DESC LIMIT 30").fetchall()]
-    rq_summary = rq_get("/api/summary", timeout=12) if RQDB4AI_API_TOKEN else {"ok": False, "error": "RQDB4AI token is not configured"}
     workers = worker_status()
     return {
         "ok": True,
         "enabled": CONTROLLER_ENABLED,
         "today": day,
         "rqdb4ai_api_url": RQDB4AI_API_URL,
+        "summary": build_status_summary(goals, rq_summary),
         "goals": goals,
         "events": events,
         "rqdb4ai": rq_summary,
