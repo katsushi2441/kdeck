@@ -35,7 +35,7 @@ KGROWTH_EXECUTABLE_KINDS = {
     item.strip()
     for item in os.environ.get(
         "KDECK_KGROWTH_EXECUTABLE_KINDS",
-        "amazon_hub_article,buzblogger_search_intent,aixsns_register_noindex",
+        "amazon_cta_rebalance,amazon_product_growth,amazon_hub_article,aixtube_amazon_cta,aixtube_search_snippet,buzblogger_search_intent,aixsns_register_noindex",
     ).split(",")
     if item.strip()
 }
@@ -610,6 +610,16 @@ def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = N
             "result_ttl": 86400,
             "failure_ttl": 604800,
         }
+        kind = str(job.get("kind") or "")
+        if kind not in KGROWTH_EXECUTABLE_KINDS:
+            insert_event(
+                conn,
+                "warn",
+                "skipped kgrowth proposal without executable job",
+                {"goal_name": goal_name, "kind": kind, "title": description},
+            )
+            continue
+
         existing = conn.execute("SELECT id, status, enabled FROM goals WHERE goal_name = ?", (goal_name,)).fetchone()
         conn.execute(
             """
@@ -647,9 +657,9 @@ def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = N
                 int(job.get("max_attempts_per_day") or 1),
                 int(job.get("cooldown_minutes") or 60) * 60,
                 200 + proposal_priority,
-                0,
-                "hold",
-                "kgrowth改善提案を取り込み済み。対応するアプリ側RQ job関数が実装されるまで自動実行しません。",
+                1,
+                "waiting",
+                f"kgrowth executable kind enabled: {kind}",
                 json.dumps(payload_data, ensure_ascii=False),
                 now,
                 now,
