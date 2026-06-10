@@ -579,6 +579,7 @@ def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = N
 
     imported = 0
     updated = 0
+    latest_goal_names: set[str] = set()
     for job in jobs:
         if not isinstance(job, dict):
             continue
@@ -587,6 +588,7 @@ def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = N
         if not job_id:
             continue
         goal_name = f"kgrowth-{kind}-{job_id[:8]}"
+        latest_goal_names.add(goal_name)
         action = str(job.get("action") or "")
         description = str(job.get("title") or goal_name)
         proposal_priority = int(job.get("priority") or 100)
@@ -657,9 +659,26 @@ def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = N
             imported += 1
         else:
             updated += 1
+    disabled_stale = 0
+    if latest_goal_names:
+        placeholders = ",".join("?" for _ in latest_goal_names)
+        cur = conn.execute(
+            f"""
+            UPDATE goals
+            SET enabled = 0,
+                current_job_id = '',
+                last_note = 'kgrowth最新提案から外れたため表示対象外',
+                updated_at = ?
+            WHERE goal_name LIKE 'kgrowth-%'
+              AND status != 'running'
+              AND goal_name NOT IN ({placeholders})
+            """,
+            [now, *sorted(latest_goal_names)],
+        )
+        disabled_stale = int(cur.rowcount or 0)
     if imported or updated:
-        insert_event(conn, "info", "synced kgrowth improvement goals", {"imported": imported, "updated": updated, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)})
-    return {"ok": True, "imported": imported, "updated": updated, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)}
+        insert_event(conn, "info", "synced kgrowth improvement goals", {"imported": imported, "updated": updated, "disabled_stale": disabled_stale, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)})
+    return {"ok": True, "imported": imported, "updated": updated, "disabled_stale": disabled_stale, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)}
 
 
 def get_state(conn: sqlite3.Connection, key: str, default: str = "") -> str:
@@ -1284,7 +1303,7 @@ def status() -> dict[str, Any]:
         day = today_key()
         now = dt.datetime.now(dt.timezone.utc)
         goals = []
-        for row in conn.execute("SELECT * FROM goals WHERE goal_name LIKE 'kgrowth-%' ORDER BY priority, id").fetchall():
+        for row in conn.execute("SELECT * FROM goals WHERE goal_name LIKE 'kgrowth-%' AND enabled = 1 ORDER BY priority, id").fetchall():
             goal = row_dict(row)
             totals = daily_totals(conn, int(goal["id"]), day)
             latest = last_goal_run(conn, int(goal["id"]))
