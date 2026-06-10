@@ -198,6 +198,26 @@ def command_run_once(_args: argparse.Namespace) -> None:
     print_json({"ok": True, "action": "idle", "refresh": refreshed})
 
 
+def latest_finished_goal_run_at(conn: sqlite3.Connection, day: str) -> str:
+    row = conn.execute(
+        """
+        SELECT MAX(finished_at) AS finished_at
+        FROM goal_runs
+        WHERE day = ? AND finished_at != ''
+        """,
+        (day,),
+    ).fetchone()
+    return str((row or {})["finished_at"] or "") if row else ""
+
+
+def should_force_kgrowth_after_completion(conn: sqlite3.Connection, day: str) -> bool:
+    latest_finished = controller.parse_iso_datetime(latest_finished_goal_run_at(conn, day))
+    if latest_finished is None:
+        return False
+    last_kgrowth = controller.last_kgrowth_run_at(conn)
+    return last_kgrowth is None or latest_finished > last_kgrowth
+
+
 def command_growth_cycle(args: argparse.Namespace) -> None:
     controller.init_db()
     with controller.connect() as conn:
@@ -235,12 +255,46 @@ def command_growth_cycle(args: argparse.Namespace) -> None:
                 continue
             if not controller.cooldown_ready(goal):
                 conn.execute("UPDATE goals SET status = 'cooldown', updated_at = ? WHERE id = ?", (controller.utc_now(), goal["id"]))
+                if goal.get("cooldown_until"):
+                    refreshed.append({
+                        "goal_name": goal["goal_name"],
+                        "changed": False,
+                        "state": "cooldown",
+                        "cooldown_until": goal.get("cooldown_until"),
+                    })
                 continue
             response = controller.enqueue_goal(conn, goal)
             print_json({"ok": True, "action": "enqueue", "goal_name": goal["goal_name"], "response": response, "refresh": refreshed})
             return
 
-        weekly = controller.run_kgrowth_weekly(conn, force=args.force_kgrowth)
+        cooldown_rows = conn.execute(
+            """
+            SELECT goal_name, cooldown_until
+            FROM goals
+            WHERE enabled = 1
+              AND status = 'cooldown'
+              AND cooldown_until != ''
+            ORDER BY cooldown_until, priority, id
+            """
+        ).fetchall()
+        live_cooldowns = [
+            {"goal_name": row["goal_name"], "cooldown_until": row["cooldown_until"]}
+            for row in cooldown_rows
+            if not controller.cooldown_ready({"cooldown_until": row["cooldown_until"]})
+        ]
+        if live_cooldowns:
+            print_json({
+                "ok": True,
+                "action": "wait_cooldown",
+                "refresh": refreshed,
+                "next": live_cooldowns[0],
+                "cooldowns": live_cooldowns[:8],
+                "note": "Goal Queue is not finished; waiting for the next cooldown before running kgrowth again.",
+            })
+            return
+
+        force_kgrowth = bool(args.force_kgrowth or should_force_kgrowth_after_completion(conn, day))
+        weekly = controller.run_kgrowth_weekly(conn, force=force_kgrowth)
         sync = controller.sync_kgrowth_improvement_goals(conn)
         enabled = controller.enable_executable_kgrowth_goals(conn)
         enqueued = None
