@@ -33,7 +33,10 @@ KGROWTH_CONFIG = os.environ.get("KDECK_KGROWTH_CONFIG", "config.json")
 KGROWTH_MIN_INTERVAL_SECONDS = int(os.environ.get("KDECK_KGROWTH_MIN_INTERVAL_SECONDS", "21600"))
 KGROWTH_EXECUTABLE_KINDS = {
     item.strip()
-    for item in os.environ.get("KDECK_KGROWTH_EXECUTABLE_KINDS", "amazon_cta_rebalance,aixtube_amazon_cta").split(",")
+    for item in os.environ.get(
+        "KDECK_KGROWTH_EXECUTABLE_KINDS",
+        "amazon_cta_rebalance,amazon_product_growth,amazon_hub_article,aixtube_amazon_cta,aixtube_search_snippet,buzblogger_search_intent,aixsns_register_noindex",
+    ).split(",")
     if item.strip()
 }
 
@@ -765,7 +768,7 @@ def enable_executable_kgrowth_goals(conn: sqlite3.Connection) -> dict[str, Any]:
                 queue = 'ollama-192-168-0-14-web',
                 payload = ?,
                 last_note = CASE
-                    WHEN status IN ('complete_today', 'running', 'cooldown') AND last_note != '' THEN last_note
+                    WHEN status IN ('complete_today', 'running', 'cooldown') AND last_note != '' AND last_note NOT LIKE '%未実装%' AND last_note NOT LIKE '%実装されるまで%' THEN last_note
                     ELSE ?
                 END,
                 updated_at = ?
