@@ -15,7 +15,7 @@ Operating model:
 - App-specific implementation belongs in each app repository, not in rqdb4ai.
 - App workers such as market-pipeline, Horizon, BuzBlogger, URL2AI, and AIxTube
   batch generation are owned by their own projects. Do not schedule or stop them
-  from this kgrowth commander.
+  from this kgrowth commander. Do not change them to hold or paused state.
 - Code-changing work should be delegated to Codex/OpenClaw when needed.
 
 Allowed safe commands:

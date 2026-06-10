@@ -193,9 +193,9 @@ Hermes enqueue schedules on `192.168.0.2` for kgrowth-driven improvement work.
 
 kdeck is not the owner of app worker schedules such as market-pipeline,
 Horizon, BuzBlogger, URL2AI, or AIxTube batch generation. Those workers keep
-running under their owning projects. kdeck's growth commander consumes kgrowth
-analysis, turns it into improvement jobs, and sends only those kgrowth jobs to
-RQDB4AI.
+running under their owning projects. kdeck must not pause, hold, or stop those
+external app workers. kdeck's growth commander consumes kgrowth analysis, turns
+it into improvement jobs, and sends only those kgrowth jobs to RQDB4AI.
 
 Operational tool surface:
 

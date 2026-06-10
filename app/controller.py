@@ -560,18 +560,6 @@ def init_db() -> None:
                 ),
             )
         sync_kgrowth_improvement_goals(conn, now)
-        conn.execute(
-            """
-            UPDATE goals
-            SET enabled = 0,
-                status = 'hold',
-                current_job_id = '',
-                last_note = 'managed by owning project, not kgrowth commander',
-                updated_at = ?
-            WHERE goal_name NOT LIKE 'kgrowth-%'
-            """,
-            (now,),
-        )
 
 
 def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = None) -> dict[str, Any]:
