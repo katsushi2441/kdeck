@@ -29,9 +29,26 @@ def command_sync_kgrowth(_args: argparse.Namespace) -> None:
     controller.init_db()
     with controller.connect() as conn:
         result = controller.sync_kgrowth_improvement_goals(conn)
+        enabled = controller.enable_executable_kgrowth_goals(conn)
     data = controller.status()
     data["sync_kgrowth"] = result
+    data["enable_executable_kgrowth"] = enabled
     print_json(data)
+
+
+def command_kgrowth_weekly(args: argparse.Namespace) -> None:
+    controller.init_db()
+    with controller.connect() as conn:
+        weekly = controller.run_kgrowth_weekly(conn, force=args.force)
+        sync = controller.sync_kgrowth_improvement_goals(conn)
+        enabled = controller.enable_executable_kgrowth_goals(conn)
+    print_json({
+        "ok": True,
+        "kgrowth_weekly": weekly,
+        "sync_kgrowth": sync,
+        "enable_executable_kgrowth": enabled,
+        "status": controller.status(),
+    })
 
 
 def command_refresh(_args: argparse.Namespace) -> None:
@@ -181,6 +198,74 @@ def command_run_once(_args: argparse.Namespace) -> None:
     print_json({"ok": True, "action": "idle", "refresh": refreshed})
 
 
+def command_growth_cycle(args: argparse.Namespace) -> None:
+    controller.init_db()
+    with controller.connect() as conn:
+        running_rows = conn.execute("SELECT * FROM goals WHERE enabled = 1 AND status = 'running' ORDER BY priority, id").fetchall()
+        refreshed: list[dict[str, Any]] = []
+        for row in running_rows:
+            goal = controller.row_dict(row)
+            refreshed.append({
+                "goal_name": goal["goal_name"],
+                "changed": controller.refresh_running_goal(conn, goal),
+            })
+
+        running = conn.execute("SELECT goal_name, current_job_id FROM goals WHERE enabled = 1 AND status = 'running' ORDER BY priority, id LIMIT 1").fetchone()
+        if running is not None:
+            print_json({"ok": True, "action": "wait_running", "running": dict(running), "refresh": refreshed})
+            return
+
+        day = controller.today_key()
+        for row in conn.execute("SELECT * FROM goals WHERE enabled = 1 ORDER BY priority, id").fetchall():
+            goal = controller.row_dict(row)
+            totals = controller.daily_totals(conn, int(goal["id"]), day)
+            if totals["items"] >= int(goal.get("daily_target") or 1):
+                conn.execute(
+                    "UPDATE goals SET status = 'complete_today', last_note = ?, updated_at = ? WHERE id = ?",
+                    (f"daily target complete: {totals['items']}/{goal['daily_target']}", controller.utc_now(), goal["id"]),
+                )
+                continue
+            if totals["runs"] >= int(goal.get("max_runs_per_day") or 1):
+                conn.execute(
+                    "UPDATE goals SET status = 'complete_today', last_note = ?, updated_at = ? WHERE id = ?",
+                    (f"max runs reached: runs={totals['runs']} items={totals['items']}/{goal['daily_target']}", controller.utc_now(), goal["id"]),
+                )
+                continue
+            if str(goal.get("status")) == "hold":
+                continue
+            if not controller.cooldown_ready(goal):
+                conn.execute("UPDATE goals SET status = 'cooldown', updated_at = ? WHERE id = ?", (controller.utc_now(), goal["id"]))
+                continue
+            response = controller.enqueue_goal(conn, goal)
+            print_json({"ok": True, "action": "enqueue", "goal_name": goal["goal_name"], "response": response, "refresh": refreshed})
+            return
+
+        weekly = controller.run_kgrowth_weekly(conn, force=args.force_kgrowth)
+        sync = controller.sync_kgrowth_improvement_goals(conn)
+        enabled = controller.enable_executable_kgrowth_goals(conn)
+        enqueued = None
+        for row in conn.execute("SELECT * FROM goals WHERE enabled = 1 ORDER BY priority, id").fetchall():
+            goal = controller.row_dict(row)
+            totals = controller.daily_totals(conn, int(goal["id"]), day)
+            if totals["items"] >= int(goal.get("daily_target") or 1):
+                continue
+            if totals["runs"] >= int(goal.get("max_runs_per_day") or 1):
+                continue
+            if str(goal.get("status")) == "hold" or not controller.cooldown_ready(goal):
+                continue
+            enqueued = {"goal_name": goal["goal_name"], "response": controller.enqueue_goal(conn, goal)}
+            break
+    print_json({
+        "ok": True,
+        "action": "kgrowth_then_enqueue" if enqueued else "kgrowth_only",
+        "refresh": refreshed,
+        "kgrowth_weekly": weekly,
+        "sync_kgrowth": sync,
+        "enable_executable_kgrowth": enabled,
+        "enqueue": enqueued,
+    })
+
+
 def command_hold(args: argparse.Namespace) -> None:
     print_json(controller.set_goal_status(args.goal_name, "hold"))
 
@@ -204,6 +289,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("status").set_defaults(func=command_status)
     sub.add_parser("sync-kgrowth").set_defaults(func=command_sync_kgrowth)
+    kgrowth_weekly = sub.add_parser("kgrowth-weekly")
+    kgrowth_weekly.add_argument("--force", action="store_true")
+    kgrowth_weekly.set_defaults(func=command_kgrowth_weekly)
     sub.add_parser("refresh").set_defaults(func=command_refresh)
     sub.add_parser("brief").set_defaults(func=command_brief)
 
@@ -213,6 +301,9 @@ def build_parser() -> argparse.ArgumentParser:
     enqueue.set_defaults(func=command_enqueue)
 
     sub.add_parser("run-once").set_defaults(func=command_run_once)
+    growth_cycle = sub.add_parser("growth-cycle")
+    growth_cycle.add_argument("--force-kgrowth", action="store_true")
+    growth_cycle.set_defaults(func=command_growth_cycle)
 
     hold = sub.add_parser("hold")
     hold.add_argument("goal_name")

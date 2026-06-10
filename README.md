@@ -184,7 +184,9 @@ Hermes enqueue schedules on `192.168.0.2`.
 
 - `kdeck-python-goal-runner.service` currently runs on `192.168.0.3`.
 - Python stores state in `storage/controller.sqlite`, refreshes running jobs, and enqueues the next eligible goal.
-- Hermes commander is disabled for normal automation until it is redesigned as a true operator/planner instead of a slow cron wrapper.
+- `kdeck-hermes-commander.service` is the main 24/365 commander loop.
+- Hermes keeps a persistent session named `kdeck-growth-commander`, observes Goal Queue state, decides one safe next action, executes it through `app.commander_tool`, and records the decision.
+- Python is the safe action surface. Hermes is the operator/planner. It must not become a hidden one-off shell script or a plain cron wrapper.
 - RQDB4AI remains the generic execution layer.
 - Hermes on `192.168.0.2` is no longer the scheduler. Its cron-like jobs are paused, while OpenClaw remains available for delegated server work.
 - A goal is complete only when its business result meets the goal rule, not when RQDB4AI accepted the enqueue request.
@@ -211,6 +213,9 @@ python3 -m app.commander_tool refresh
 python3 -m app.commander_tool status
 python3 -m app.commander_tool enqueue <goal_name>
 python3 -m app.commander_tool run-once
+python3 -m app.commander_tool growth-cycle
+python3 -m app.commander_tool kgrowth-weekly
+python3 -m app.commander_tool sync-kgrowth
 python3 -m app.commander_tool hold <goal_name>
 python3 -m app.commander_tool resume <goal_name>
 python3 -m app.commander_tool event warn "message" --data '{}'
@@ -226,10 +231,34 @@ python3 -m app.commander_tool run-once
 `blocked_reason`. `run-once` refreshes running jobs, waits if anything is
 running, and otherwise enqueues one eligible goal.
 
+Hermes growth commander turn:
+
+```bash
+scripts/hermes_growth_commander_once.sh
+```
+
+The loop script runs that turn repeatedly:
+
+```bash
+scripts/run_hermes_commander.sh
+```
+
+Default Hermes model settings are intentionally conservative:
+
+```bash
+KDECK_HERMES_COMMANDER_PROVIDER=openrouter
+KDECK_HERMES_COMMANDER_MODEL=openai/gpt-4o-mini
+```
+
+The commander can be moved to a stronger model by environment variable, but the
+loop must remain cheap and reliable. Code-changing work should be delegated to
+Codex/OpenClaw rather than forcing every monitoring turn through an expensive
+frontier model.
+
 Commander API:
 
 - `GET /api/controller/status`
-- `POST /api/controller/tick` runs one Hermes commander turn
+- `POST /api/controller/tick` runs one Hermes growth commander turn
 - `POST /api/controller/goals/{goal_name}/hold`
 - `POST /api/controller/goals/{goal_name}/resume`
 

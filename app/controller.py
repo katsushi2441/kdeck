@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -27,6 +28,14 @@ DEFAULT_COOLDOWN_SECONDS = int(os.environ.get("KDECK_CONTROLLER_COOLDOWN_SECONDS
 KGROWTH_IMPROVEMENT_JOBS_PATH = Path(
     os.environ.get("KDECK_KGROWTH_IMPROVEMENT_JOBS", "/home/kojima/work/kgrowth/data/improvement_jobs_latest.json")
 ).expanduser()
+KGROWTH_DIR = Path(os.environ.get("KDECK_KGROWTH_DIR", "/home/kojima/work/kgrowth")).expanduser()
+KGROWTH_CONFIG = os.environ.get("KDECK_KGROWTH_CONFIG", "config.json")
+KGROWTH_MIN_INTERVAL_SECONDS = int(os.environ.get("KDECK_KGROWTH_MIN_INTERVAL_SECONDS", "21600"))
+KGROWTH_EXECUTABLE_KINDS = {
+    item.strip()
+    for item in os.environ.get("KDECK_KGROWTH_EXECUTABLE_KINDS", "amazon_cta_rebalance,aixtube_amazon_cta").split(",")
+    if item.strip()
+}
 
 
 MARKET_TASKS = [
@@ -500,6 +509,11 @@ def init_db() -> None:
                 data TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS controller_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            );
             """
         )
         now = utc_now()
@@ -609,7 +623,10 @@ def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = N
                 max_runs_per_day = excluded.max_runs_per_day,
                 cooldown_seconds = excluded.cooldown_seconds,
                 priority = excluded.priority,
-                last_note = excluded.last_note,
+                last_note = CASE
+                    WHEN goals.enabled = 0 AND goals.status = 'hold' THEN excluded.last_note
+                    ELSE goals.last_note
+                END,
                 payload = excluded.payload,
                 updated_at = excluded.updated_at
             """,
@@ -640,6 +657,132 @@ def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = N
     if imported or updated:
         insert_event(conn, "info", "synced kgrowth improvement goals", {"imported": imported, "updated": updated, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)})
     return {"ok": True, "imported": imported, "updated": updated, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)}
+
+
+def get_state(conn: sqlite3.Connection, key: str, default: str = "") -> str:
+    row = conn.execute("SELECT value FROM controller_state WHERE key = ?", (key,)).fetchone()
+    if row is None:
+        return default
+    return str(row["value"] or default)
+
+
+def set_state(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO controller_state(key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+        """,
+        (key, value, utc_now()),
+    )
+
+
+def last_kgrowth_run_at(conn: sqlite3.Connection) -> dt.datetime | None:
+    value = get_state(conn, "kgrowth.last_run_at", "")
+    if not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def kgrowth_due(conn: sqlite3.Connection, now: dt.datetime | None = None) -> bool:
+    now = now or dt.datetime.now(dt.timezone.utc)
+    last = last_kgrowth_run_at(conn)
+    if last is None:
+        return True
+    return (now - last).total_seconds() >= KGROWTH_MIN_INTERVAL_SECONDS
+
+
+def run_kgrowth_weekly(conn: sqlite3.Connection, *, force: bool = False) -> dict[str, Any]:
+    now = dt.datetime.now(dt.timezone.utc)
+    if not force and not kgrowth_due(conn, now):
+        last = last_kgrowth_run_at(conn)
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "kgrowth_min_interval",
+            "last_run_at": last.isoformat() if last else "",
+            "min_interval_seconds": KGROWTH_MIN_INTERVAL_SECONDS,
+        }
+    if not KGROWTH_DIR.is_dir():
+        raise RuntimeError(f"kgrowth directory not found: {KGROWTH_DIR}")
+    started = utc_now()
+    proc = subprocess.run(
+        ["python3", "-m", "kgrowth.cli", "weekly", "--config", KGROWTH_CONFIG],
+        cwd=str(KGROWTH_DIR),
+        text=True,
+        capture_output=True,
+        timeout=int(os.environ.get("KDECK_KGROWTH_TIMEOUT_SECONDS", "1800")),
+        check=False,
+    )
+    result = {
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
+        "started_at": started,
+        "finished_at": utc_now(),
+        "cwd": str(KGROWTH_DIR),
+        "command": ["python3", "-m", "kgrowth.cli", "weekly", "--config", KGROWTH_CONFIG],
+        "stdout_tail": proc.stdout[-4000:],
+        "stderr_tail": proc.stderr[-4000:],
+    }
+    set_state(conn, "kgrowth.last_run_at", result["finished_at"])
+    set_state(conn, "kgrowth.last_result", json.dumps(result, ensure_ascii=False))
+    insert_event(conn, "info" if result["ok"] else "warn", "kgrowth weekly completed" if result["ok"] else "kgrowth weekly failed", result)
+    if proc.returncode != 0:
+        raise RuntimeError(f"kgrowth weekly failed returncode={proc.returncode}: {proc.stderr[-1000:]}")
+    return result
+
+
+def enable_executable_kgrowth_goals(conn: sqlite3.Connection) -> dict[str, Any]:
+    enabled = 0
+    updated = 0
+    rows = conn.execute("SELECT * FROM goals WHERE goal_name LIKE 'kgrowth-%' ORDER BY priority, id").fetchall()
+    for row in rows:
+        goal = row_dict(row)
+        payload = dict(goal.get("payload") or {})
+        meta = dict(payload.get("meta") or {})
+        kwargs = dict(payload.get("kwargs") or {})
+        kind = str(meta.get("kind") or (kwargs.get("improvement_job") or {}).get("kind") or "")
+        if kind not in KGROWTH_EXECUTABLE_KINDS:
+            continue
+        kwargs["source"] = "web_manual"
+        kwargs["queue_class"] = "web"
+        meta["source"] = "web_manual"
+        meta["queue_class"] = "web"
+        meta["priority_class"] = "interactive"
+        payload["kwargs"] = kwargs
+        payload["meta"] = meta
+        conn.execute(
+            """
+            UPDATE goals
+            SET enabled = 1,
+                status = CASE WHEN status = 'hold' THEN 'waiting' ELSE status END,
+                queue = 'ollama-192-168-0-14-web',
+                payload = ?,
+                last_note = CASE
+                    WHEN status IN ('complete_today', 'running', 'cooldown') AND last_note != '' THEN last_note
+                    ELSE ?
+                END,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                json.dumps(payload, ensure_ascii=False),
+                f"kgrowth executable kind enabled: {kind}",
+                utc_now(),
+                goal["id"],
+            ),
+        )
+        enabled += 1
+        updated += 1
+    if updated:
+        insert_event(conn, "info", "enabled executable kgrowth goals", {"enabled": enabled, "kinds": sorted(KGROWTH_EXECUTABLE_KINDS)})
+    return {"ok": True, "enabled": enabled, "kinds": sorted(KGROWTH_EXECUTABLE_KINDS)}
 
 
 def row_dict(row: sqlite3.Row | None) -> dict[str, Any]:

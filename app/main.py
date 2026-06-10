@@ -838,7 +838,7 @@ def controller_status() -> dict[str, Any]:
 
 @app.post("/api/controller/tick", dependencies=[Depends(require_auth)])
 def controller_tick() -> dict[str, Any]:
-    script = Path(__file__).resolve().parents[1] / "scripts" / "hermes_commander_once.sh"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "hermes_growth_commander_once.sh"
     if not script.exists():
         raise HTTPException(status_code=500, detail="hermes commander script not found")
     proc = subprocess.run(

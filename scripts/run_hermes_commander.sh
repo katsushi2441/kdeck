@@ -13,6 +13,6 @@ fi
 INTERVAL="${KDECK_HERMES_COMMANDER_INTERVAL_SECONDS:-300}"
 
 while true; do
-  scripts/hermes_commander_once.sh || true
+  scripts/hermes_growth_commander_once.sh || true
   sleep "$INTERVAL"
 done
