@@ -180,10 +180,10 @@ Operational rules:
 ## Goal Queue Runner
 
 kdeck owns the operational command loop that replaces the old time-based
-Hermes enqueue schedules on `192.168.0.2`.
+Hermes enqueue schedules on `192.168.0.2` for kgrowth-driven improvement work.
 
 - `kdeck-python-goal-runner.service` currently runs on `192.168.0.3`.
-- Python stores state in `storage/controller.sqlite`, refreshes running jobs, and enqueues the next eligible goal.
+- Python stores state in `storage/controller.sqlite`, refreshes running kgrowth jobs, and enqueues the next eligible kgrowth improvement goal.
 - `kdeck-hermes-commander.service` is the main 24/365 commander loop.
 - Hermes keeps a persistent session named `kdeck-growth-commander`, observes Goal Queue state, decides one safe next action, executes it through `app.commander_tool`, and records the decision.
 - Python is the safe action surface. Hermes is the operator/planner. It must not become a hidden one-off shell script or a plain cron wrapper.
@@ -191,19 +191,11 @@ Hermes enqueue schedules on `192.168.0.2`.
 - Hermes on `192.168.0.2` is no longer the scheduler. Its cron-like jobs are paused, while OpenClaw remains available for delegated server work.
 - A goal is complete only when its business result meets the goal rule, not when RQDB4AI accepted the enqueue request.
 
-The first production goal is `aixec-market-pipeline`:
-
-- per-run target: 500 newly created market items
-- daily target: 4000 newly created items, equivalent to 500 x 8 successful runs
-- maximum runs per day: effectively unlimited; it keeps running until the daily target is met
-- resource lock: `ollama:192.168.0.14:gemma4:e4b`
-- cooldown: 900 seconds between attempts
-
-If one run returns fewer than 500 items, kdeck records the partial count.
-The runner retries market-pipeline until the daily target is met, but it does not
-block every other worker while market is cooling down. During market cooldown,
-the runner may run the next eligible goal such as register-market, Horizon, OSS,
-Polymarket, FinReport, or buzblogger.
+kdeck is not the owner of app worker schedules such as market-pipeline,
+Horizon, BuzBlogger, URL2AI, or AIxTube batch generation. Those workers keep
+running under their owning projects. kdeck's growth commander consumes kgrowth
+analysis, turns it into improvement jobs, and sends only those kgrowth jobs to
+RQDB4AI.
 
 Operational tool surface:
 

@@ -560,6 +560,18 @@ def init_db() -> None:
                 ),
             )
         sync_kgrowth_improvement_goals(conn, now)
+        conn.execute(
+            """
+            UPDATE goals
+            SET enabled = 0,
+                status = 'hold',
+                current_job_id = '',
+                last_note = 'managed by owning project, not kgrowth commander',
+                updated_at = ?
+            WHERE goal_name NOT LIKE 'kgrowth-%'
+            """,
+            (now,),
+        )
 
 
 def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = None) -> dict[str, Any]:
@@ -1276,12 +1288,12 @@ def status() -> dict[str, Any]:
     init_db()
     rq_summary = rq_get("/api/summary", timeout=12) if RQDB4AI_API_TOKEN else {"ok": False, "error": "RQDB4AI token is not configured"}
     with connect() as conn:
-        for row in conn.execute("SELECT * FROM goals WHERE status = 'running' ORDER BY priority, id").fetchall():
+        for row in conn.execute("SELECT * FROM goals WHERE goal_name LIKE 'kgrowth-%' AND status = 'running' ORDER BY priority, id").fetchall():
             refresh_running_goal(conn, row_dict(row))
         day = today_key()
         now = dt.datetime.now(dt.timezone.utc)
         goals = []
-        for row in conn.execute("SELECT * FROM goals ORDER BY priority, id").fetchall():
+        for row in conn.execute("SELECT * FROM goals WHERE goal_name LIKE 'kgrowth-%' ORDER BY priority, id").fetchall():
             goal = row_dict(row)
             totals = daily_totals(conn, int(goal["id"]), day)
             latest = last_goal_run(conn, int(goal["id"]))
