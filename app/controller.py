@@ -35,7 +35,7 @@ KGROWTH_EXECUTABLE_KINDS = {
     item.strip()
     for item in os.environ.get(
         "KDECK_KGROWTH_EXECUTABLE_KINDS",
-        "amazon_cta_rebalance,amazon_product_growth,amazon_hub_article,aixtube_amazon_cta,aixtube_search_snippet,buzblogger_search_intent,aixsns_register_noindex",
+        "amazon_hub_article,buzblogger_search_intent,aixsns_register_noindex",
     ).split(",")
     if item.strip()
 }
