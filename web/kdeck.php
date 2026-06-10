@@ -246,7 +246,6 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
     <div class="metric"><span class="muted">待機</span><b id="metric-waiting">0</b></div>
     <div class="metric"><span class="muted">冷却中</span><b id="metric-cooldown">0</b></div>
     <div class="metric"><span class="muted">本日完了</span><b id="metric-complete">0</b></div>
-    <div class="metric"><span class="muted">保留</span><b id="metric-hold">0</b></div>
     <div class="metric wide"><span class="muted">次に動くGoal</span><b id="metric-next">-</b></div>
   </div>
   <div id="goal-list" class="event-list"><div class="event-item">Goalを読み込み中...</div></div>
@@ -285,7 +284,6 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	const metricWaiting = document.getElementById('metric-waiting');
 	const metricCooldown = document.getElementById('metric-cooldown');
 	const metricComplete = document.getElementById('metric-complete');
-	const metricHold = document.getElementById('metric-hold');
 	const metricNext = document.getElementById('metric-next');
 	const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 	const canSpeak = 'speechSynthesis' in window;
@@ -572,7 +570,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  return String(text ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch]));
 	}
 	function statusLabel(status){
-	  const labels = {waiting:'待機', running:'実行中', cooldown:'冷却中', complete_today:'本日完了', hold:'保留'};
+	  const labels = {waiting:'待機', running:'実行中', cooldown:'冷却中', complete_today:'本日完了'};
 	  return labels[status] || status || '-';
 	}
 	function renderController(data){
@@ -592,7 +590,6 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  metricWaiting.textContent = String(summary.waiting ?? goals.filter(goal => goal.status === 'waiting').length);
 	  metricCooldown.textContent = String(summary.cooling_down ?? goals.filter(goal => goal.is_cooling_down).length);
 	  metricComplete.textContent = String(summary.complete_today ?? goals.filter(goal => goal.status === 'complete_today').length);
-	  metricHold.textContent = String(summary.hold ?? goals.filter(goal => goal.status === 'hold').length);
 	  metricNext.textContent = nextText;
 	  goalList.innerHTML = goals.map(goal => {
 	    const today = goal.today || {};
@@ -604,9 +601,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	    const cooldownText = goal.is_cooling_down ? `あと ${fmtDuration(goal.cooldown_remaining_seconds)}` : '';
 	    const lastJob = goal.last_job_id ? String(goal.last_job_id).slice(0, 8) : '-';
 	    const note = goal.last_run_note || goal.last_note || '';
-	    const actions = goal.status === 'hold'
-	      ? `<button type="button" class="secondary goal-action" data-goal="${escapeHtml(goal.goal_name)}" data-action="resume">再開</button>`
-	      : `<button type="button" class="secondary goal-action" data-goal="${escapeHtml(goal.goal_name)}" data-action="hold">保留</button>`;
+	    const actions = '';
 	    return `<article class="goal-card">
 	      <div class="goal-top"><div><b>${escapeHtml(goal.goal_name)}</b><div class="muted">${escapeHtml(goal.description || goal.worker_name || '')}</div></div><span class="pill ${escapeHtml(goal.status)}">${escapeHtml(statusLabel(goal.status))}</span></div>
 	      <div class="progress" title="${items}/${target}"><span style="width:${percent}%"></span></div>
