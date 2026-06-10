@@ -243,10 +243,10 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
   <div class="ops-head"><div><h2>Goal Queue</h2><div class="muted" id="controller-status-line">読み込み中...</div></div><button type="button" id="controller-tick" class="secondary">Hermes Tick</button></div>
   <div class="ops-grid">
     <div class="metric"><span class="muted">実行中</span><b id="metric-running">0</b></div>
-    <div class="metric"><span class="muted">RQ中</span><b id="metric-queued">0</b></div>
+    <div class="metric"><span class="muted">待機</span><b id="metric-waiting">0</b></div>
     <div class="metric"><span class="muted">冷却中</span><b id="metric-cooldown">0</b></div>
     <div class="metric"><span class="muted">本日完了</span><b id="metric-complete">0</b></div>
-    <div class="metric"><span class="muted">今日</span><b id="metric-today">-</b></div>
+    <div class="metric"><span class="muted">保留</span><b id="metric-hold">0</b></div>
     <div class="metric wide"><span class="muted">次に動くGoal</span><b id="metric-next">-</b></div>
   </div>
   <div id="goal-list" class="event-list"><div class="event-item">Goalを読み込み中...</div></div>
@@ -282,10 +282,10 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	const goalList = document.getElementById('goal-list');
 	const controllerEvents = document.getElementById('controller-events');
 	const metricRunning = document.getElementById('metric-running');
-	const metricQueued = document.getElementById('metric-queued');
+	const metricWaiting = document.getElementById('metric-waiting');
 	const metricCooldown = document.getElementById('metric-cooldown');
 	const metricComplete = document.getElementById('metric-complete');
-	const metricToday = document.getElementById('metric-today');
+	const metricHold = document.getElementById('metric-hold');
 	const metricNext = document.getElementById('metric-next');
 	const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 	const canSpeak = 'speechSynthesis' in window;
@@ -587,13 +587,12 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  controllerStatusLine.textContent = data.enabled
 	    ? `Hermes commander ready / ${nextText}`
 	    : 'Hermes commander disabled';
-	  metricToday.textContent = data.today || '-';
-	  const live = data.rqdb4ai?.totals?.live || {};
-	  metricQueued.textContent = String(summary.rq_live ?? (Number(live.queued || 0) + Number(live.started || 0)));
 	  const goals = Array.isArray(data.goals) ? data.goals : [];
 	  metricRunning.textContent = String(summary.running ?? goals.filter(goal => goal.status === 'running').length);
+	  metricWaiting.textContent = String(summary.waiting ?? goals.filter(goal => goal.status === 'waiting').length);
 	  metricCooldown.textContent = String(summary.cooling_down ?? goals.filter(goal => goal.is_cooling_down).length);
 	  metricComplete.textContent = String(summary.complete_today ?? goals.filter(goal => goal.status === 'complete_today').length);
+	  metricHold.textContent = String(summary.hold ?? goals.filter(goal => goal.status === 'hold').length);
 	  metricNext.textContent = nextText;
 	  goalList.innerHTML = goals.map(goal => {
 	    const today = goal.today || {};
