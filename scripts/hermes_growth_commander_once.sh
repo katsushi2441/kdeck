@@ -24,21 +24,27 @@ Take exactly one commander turn now."
 echo "===== $(date --iso-8601=seconds) hermes growth commander =====" | tee -a storage/hermes_growth_commander.log
 
 SESSION_TITLE="kdeck-growth-commander"
-HERMES_COMMANDER_PROVIDER="${KDECK_HERMES_COMMANDER_PROVIDER:-openrouter}"
-HERMES_COMMANDER_MODEL="${KDECK_HERMES_COMMANDER_MODEL:-openai/gpt-4o-mini}"
+HERMES_COMMANDER_PROVIDER="${KDECK_HERMES_COMMANDER_PROVIDER:-}"
+HERMES_COMMANDER_MODEL="${KDECK_HERMES_COMMANDER_MODEL:-}"
 HERMES_COMMANDER_TIMEOUT="${KDECK_HERMES_COMMANDER_TIMEOUT_SECONDS:-180}"
 SESSION_ID="$(hermes sessions list | awk -v title="$SESSION_TITLE" 'NR > 2 && substr($0, 1, length(title)) == title && substr($0, length(title) + 1, 1) == " " {print $NF; exit}')"
 SESSION_ARGS=()
 if [[ -n "$SESSION_ID" ]]; then
   SESSION_ARGS=(--resume "$SESSION_ID")
 fi
+MODEL_ARGS=()
+if [[ -n "$HERMES_COMMANDER_PROVIDER" ]]; then
+  MODEL_ARGS+=(--provider "$HERMES_COMMANDER_PROVIDER")
+fi
+if [[ -n "$HERMES_COMMANDER_MODEL" ]]; then
+  MODEL_ARGS+=(--model "$HERMES_COMMANDER_MODEL")
+fi
 
 set +e
 OUTPUT=$(
   timeout "$HERMES_COMMANDER_TIMEOUT" hermes chat \
     "${SESSION_ARGS[@]}" \
-    --provider "$HERMES_COMMANDER_PROVIDER" \
-    --model "$HERMES_COMMANDER_MODEL" \
+    "${MODEL_ARGS[@]}" \
     --source kdeck-growth-commander \
     --accept-hooks \
     --pass-session-id \

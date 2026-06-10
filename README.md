@@ -243,17 +243,18 @@ The loop script runs that turn repeatedly:
 scripts/run_hermes_commander.sh
 ```
 
-Default Hermes model settings are intentionally conservative:
+Default Hermes model is controlled by Hermes config, not by a separate kdeck
+backend. kdeck can override the Hermes provider/model only when needed:
 
 ```bash
-KDECK_HERMES_COMMANDER_PROVIDER=openrouter
-KDECK_HERMES_COMMANDER_MODEL=openai/gpt-4o-mini
+KDECK_HERMES_COMMANDER_PROVIDER=
+KDECK_HERMES_COMMANDER_MODEL=
 ```
 
-The commander can be moved to a stronger model by environment variable, but the
-loop must remain cheap and reliable. Code-changing work should be delegated to
-Codex/OpenClaw rather than forcing every monitoring turn through an expensive
-frontier model.
+The intended setup is: Hermes Agent is the commander. Its LLM should be Codex
+OAuth or Claude/Anthropic when authenticated. Codex CLI / Claude Code may still
+be called by Hermes for implementation work, but they are not a replacement for
+the Hermes Agent loop.
 
 Commander API:
 
