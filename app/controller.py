@@ -24,6 +24,9 @@ RQDB4AI_API_TOKEN = os.environ.get("KDECK_RQDB4AI_API_TOKEN", os.environ.get("RQ
 WORKER_STATUS_URL = os.environ.get("KDECK_WORKER_STATUS_URL", "https://aixec.exbridge.jp/api.php?path=worker/status")
 CONTROLLER_ENABLED = os.environ.get("KDECK_CONTROLLER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 DEFAULT_COOLDOWN_SECONDS = int(os.environ.get("KDECK_CONTROLLER_COOLDOWN_SECONDS", "900"))
+KGROWTH_IMPROVEMENT_JOBS_PATH = Path(
+    os.environ.get("KDECK_KGROWTH_IMPROVEMENT_JOBS", "/home/kojima/work/kgrowth/data/improvement_jobs_latest.json")
+).expanduser()
 
 
 MARKET_TASKS = [
@@ -542,6 +545,101 @@ def init_db() -> None:
                     now,
                 ),
             )
+        sync_kgrowth_improvement_goals(conn, now)
+
+
+def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = None) -> dict[str, Any]:
+    now = now or utc_now()
+    if not KGROWTH_IMPROVEMENT_JOBS_PATH.is_file():
+        return {"ok": False, "error": "kgrowth improvement jobs not found", "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)}
+    try:
+        payload = json.loads(KGROWTH_IMPROVEMENT_JOBS_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return {"ok": False, "error": f"invalid kgrowth improvement jobs json: {exc}", "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)}
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, list):
+        return {"ok": False, "error": "kgrowth improvement jobs json has no jobs list", "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)}
+
+    imported = 0
+    updated = 0
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        job_id = str(job.get("id") or "").strip()
+        kind = re.sub(r"[^a-zA-Z0-9_.-]", "-", str(job.get("kind") or "improvement")).strip("-")
+        if not job_id:
+            continue
+        goal_name = f"kgrowth-{kind}-{job_id[:8]}"
+        action = str(job.get("action") or "")
+        description = str(job.get("title") or goal_name)
+        proposal_priority = int(job.get("priority") or 100)
+        payload_data = {
+            "kwargs": {
+                "dry_run": False,
+                "source": "kgrowth",
+                "improvement_job": job,
+            },
+            "meta": {
+                "project": "kgrowth",
+                "app": str(job.get("target_app") or ""),
+                "kind": str(job.get("kind") or ""),
+                "action": action,
+                "source": "kgrowth",
+                "worker_name": "kgrowth-improvement-enqueue",
+            },
+            "timeout": 1800,
+            "result_ttl": 86400,
+            "failure_ttl": 604800,
+        }
+        existing = conn.execute("SELECT id, status, enabled FROM goals WHERE goal_name = ?", (goal_name,)).fetchone()
+        conn.execute(
+            """
+            INSERT INTO goals (
+                goal_name, worker_name, description, function_name, queue, resource,
+                daily_target, per_run_target, max_runs_per_day, cooldown_seconds,
+                priority, enabled, status, last_note, payload, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(goal_name) DO UPDATE SET
+                worker_name = excluded.worker_name,
+                description = excluded.description,
+                resource = excluded.resource,
+                daily_target = excluded.daily_target,
+                per_run_target = excluded.per_run_target,
+                max_runs_per_day = excluded.max_runs_per_day,
+                cooldown_seconds = excluded.cooldown_seconds,
+                priority = excluded.priority,
+                last_note = excluded.last_note,
+                payload = excluded.payload,
+                updated_at = excluded.updated_at
+            """,
+            (
+                goal_name,
+                "kgrowth-improvement-enqueue",
+                description,
+                "kgrowth_jobs.execute_improvement_job",
+                "auto",
+                "kgrowth-improvement",
+                1,
+                1,
+                int(job.get("max_attempts_per_day") or 1),
+                int(job.get("cooldown_minutes") or 60) * 60,
+                200 + proposal_priority,
+                0,
+                "hold",
+                "kgrowth改善提案を取り込み済み。対応するアプリ側RQ job関数が実装されるまで自動実行しません。",
+                json.dumps(payload_data, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+        if existing is None:
+            imported += 1
+        else:
+            updated += 1
+    if imported or updated:
+        insert_event(conn, "info", "synced kgrowth improvement goals", {"imported": imported, "updated": updated, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)})
+    return {"ok": True, "imported": imported, "updated": updated, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)}
 
 
 def row_dict(row: sqlite3.Row | None) -> dict[str, Any]:

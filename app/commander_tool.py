@@ -25,6 +25,15 @@ def command_status(_args: argparse.Namespace) -> None:
     print_json(controller.status())
 
 
+def command_sync_kgrowth(_args: argparse.Namespace) -> None:
+    controller.init_db()
+    with controller.connect() as conn:
+        result = controller.sync_kgrowth_improvement_goals(conn)
+    data = controller.status()
+    data["sync_kgrowth"] = result
+    print_json(data)
+
+
 def command_refresh(_args: argparse.Namespace) -> None:
     controller.init_db()
     changed: list[dict[str, Any]] = []
@@ -194,6 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("status").set_defaults(func=command_status)
+    sub.add_parser("sync-kgrowth").set_defaults(func=command_sync_kgrowth)
     sub.add_parser("refresh").set_defaults(func=command_refresh)
     sub.add_parser("brief").set_defaults(func=command_brief)
 

@@ -236,6 +236,30 @@ Commander API:
 The web UI at `kdeck.php` shows Goal Queue, today progress, active/cooldown
 state, RQDB4AI live queue counts, worker status, and Hermes decision logs.
 
+## kgrowth Improvement Goals
+
+`kgrowth` analyzes GSC and simpletrack data, then writes:
+
+```text
+/home/kojima/work/kgrowth/data/improvement_jobs_latest.json
+```
+
+kdeck imports those proposals as `kgrowth-*` Goal Queue entries. They are
+created as `hold` and `enabled=0` because they are improvement proposals, not
+yet guaranteed executable RQ jobs. This avoids the old failure mode where
+`enqueue` succeeded but the underlying app job did not exist.
+
+Manual sync:
+
+```bash
+cd /home/kojima/work/kdeck
+python3 -m app.commander_tool sync-kgrowth
+```
+
+When an app-owned implementation exists, enable the corresponding goal by
+updating its function/payload and setting `enabled=1`, then resume it through
+kdeck.
+
 ## Setup
 
 Create `.env` from `.env.sample` and set a strong token.
