@@ -16,7 +16,7 @@ mkdir -p storage
 while true; do
   {
     echo "===== $(date --iso-8601=seconds) kdeck python goal runner ====="
-    python3 -m app.commander_tool run-once
+    python3 -m app.commander_tool growth-cycle
   } >> storage/python_goal_runner.log 2>&1 || true
   sleep "$INTERVAL"
 done

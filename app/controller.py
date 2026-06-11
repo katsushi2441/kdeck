@@ -31,6 +31,7 @@ KGROWTH_IMPROVEMENT_JOBS_PATH = Path(
 KGROWTH_DIR = Path(os.environ.get("KDECK_KGROWTH_DIR", "/home/kojima/work/kgrowth")).expanduser()
 KGROWTH_CONFIG = os.environ.get("KDECK_KGROWTH_CONFIG", "config.json")
 KGROWTH_MIN_INTERVAL_SECONDS = int(os.environ.get("KDECK_KGROWTH_MIN_INTERVAL_SECONDS", "21600"))
+MAX_ACTIVE_GOALS = int(os.environ.get("KDECK_MAX_ACTIVE_GOALS", "6"))
 KGROWTH_EXECUTABLE_KINDS = {
     item.strip()
     for item in os.environ.get(
@@ -667,6 +668,34 @@ def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = N
             imported += 1
         else:
             updated += 1
+    completed_restored = conn.execute(
+        """
+        UPDATE goals
+        SET enabled = 1,
+            status = 'completed',
+            current_job_id = '',
+            cooldown_until = '',
+            last_note = CASE
+                WHEN last_note = '' OR last_note LIKE 'kgrowth最新提案から外れたため表示対象外%' THEN 'kgrowth improvement completed; do not rerun'
+                ELSE last_note
+            END,
+            updated_at = ?
+        WHERE goal_name LIKE 'kgrowth-%'
+          AND EXISTS (
+              SELECT 1
+              FROM goal_runs
+              WHERE goal_runs.goal_id = goals.id
+                AND (goal_runs.ok = 1 OR goal_runs.business_status = 'ok')
+          )
+          AND (
+              enabled != 1
+              OR status != 'completed'
+              OR current_job_id != ''
+              OR cooldown_until != ''
+          )
+        """,
+        (now,),
+    ).rowcount or 0
     disabled_stale = 0
     if latest_goal_names:
         placeholders = ",".join("?" for _ in latest_goal_names)
@@ -678,15 +707,21 @@ def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = N
                 last_note = 'kgrowth最新提案から外れたため表示対象外',
                 updated_at = ?
             WHERE goal_name LIKE 'kgrowth-%'
-              AND status != 'running'
+              AND status NOT IN ('running', 'completed')
               AND goal_name NOT IN ({placeholders})
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM goal_runs
+                  WHERE goal_runs.goal_id = goals.id
+                    AND (goal_runs.ok = 1 OR goal_runs.business_status = 'ok')
+              )
             """,
             [now, *sorted(latest_goal_names)],
         )
         disabled_stale = int(cur.rowcount or 0)
     if imported or updated:
-        insert_event(conn, "info", "synced kgrowth improvement goals", {"imported": imported, "updated": updated, "disabled_stale": disabled_stale, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)})
-    return {"ok": True, "imported": imported, "updated": updated, "disabled_stale": disabled_stale, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)}
+        insert_event(conn, "info", "synced kgrowth improvement goals", {"imported": imported, "updated": updated, "completed_restored": completed_restored, "disabled_stale": disabled_stale, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)})
+    return {"ok": True, "imported": imported, "updated": updated, "completed_restored": int(completed_restored), "disabled_stale": disabled_stale, "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)}
 
 
 def get_state(conn: sqlite3.Connection, key: str, default: str = "") -> str:
@@ -941,19 +976,41 @@ def last_goal_run(conn: sqlite3.Connection, goal_id: int) -> dict[str, Any]:
     return row_dict(row)
 
 
+def is_kgrowth_goal(goal: dict[str, Any]) -> bool:
+    return str(goal.get("goal_name") or "").startswith("kgrowth-")
+
+
+def goal_has_successful_run(conn: sqlite3.Connection, goal_id: int) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM goal_runs
+        WHERE goal_id = ?
+          AND (ok = 1 OR business_status = 'ok')
+        LIMIT 1
+        """,
+        (goal_id,),
+    ).fetchone()
+    return row is not None
+
+
 def daily_target_reached(goal: dict[str, Any], totals: dict[str, int]) -> bool:
+    if is_kgrowth_goal(goal):
+        return False
     target = int(goal.get("daily_target") or 0)
     return target > 0 and int(totals.get("items") or 0) >= target
 
 
 def daily_run_limit_reached(goal: dict[str, Any], totals: dict[str, int]) -> bool:
+    if is_kgrowth_goal(goal):
+        return False
     max_runs = int(goal.get("max_runs_per_day") or 0)
     return max_runs > 0 and int(totals.get("runs") or 0) >= max_runs
 
 
 def effective_goal_status(goal: dict[str, Any], totals: dict[str, int], now: dt.datetime) -> str:
     raw_status = str(goal.get("status") or "waiting")
-    if raw_status in {"running", "hold"}:
+    if raw_status in {"running", "hold", "completed"}:
         return raw_status
     if daily_target_reached(goal, totals):
         return "complete_today"
@@ -971,6 +1028,19 @@ def reconcile_goal_for_today(conn: sqlite3.Connection, goal: dict[str, Any], tot
     status_value = str(goal.get("status") or "waiting")
     if status_value in {"running", "hold"}:
         return False
+    if is_kgrowth_goal(goal) and goal_has_successful_run(conn, int(goal["id"])):
+        desired_note = str(goal.get("last_note") or "kgrowth improvement completed; do not rerun")
+        if status_value == "completed" and not str(goal.get("current_job_id") or "") and not str(goal.get("cooldown_until") or ""):
+            return False
+        conn.execute(
+            """
+            UPDATE goals
+            SET status = 'completed', current_job_id = '', last_note = ?, cooldown_until = '', updated_at = ?
+            WHERE id = ?
+            """,
+            (desired_note, utc_now(), goal["id"]),
+        )
+        return True
     desired_status = effective_goal_status(goal, totals, now)
     desired_note = str(goal.get("last_note") or "")
     desired_cooldown_until = str(goal.get("cooldown_until") or "")
@@ -1033,6 +1103,9 @@ def enrich_goal_for_status(goal: dict[str, Any], totals: dict[str, int], last_ru
     elif status_value == "limit_today":
         next_action = "本日実行上限"
         next_reason = f"実行上限到達: runs={totals['runs']}/{max_runs}, items={totals['items']}/{target}"
+    elif status_value == "completed":
+        next_action = "完了"
+        next_reason = "kgrowth改善ジョブは成功済みのため再実行しません"
     elif cooldown_remaining > 0:
         next_eligible_at = cooldown_until.isoformat() if cooldown_until else ""
         next_action = "冷却中"
@@ -1050,6 +1123,7 @@ def enrich_goal_for_status(goal: dict[str, Any], totals: dict[str, int], last_ru
         "cooldown": "冷却中",
         "complete_today": "本日目標達成",
         "limit_today": "本日上限",
+        "completed": "完了",
         "hold": "保留",
     }.get(status_value, status_value)
     enriched["today"] = {
@@ -1084,10 +1158,12 @@ def build_status_summary(goals: list[dict[str, Any]], rq_summary: dict[str, Any]
         "cooldown_ready": 0,
         "complete_today": 0,
         "limit_today": 0,
+        "completed": 0,
         "hold": 0,
         "rq_waiting": int(live.get("queued") or 0),
         "rq_running": int(live.get("started") or 0),
         "rq_live": int(live.get("queued") or 0) + int(live.get("started") or 0),
+        "max_active_goals": MAX_ACTIVE_GOALS,
         "next_goal_name": "",
         "next_eligible_at": "",
         "next_action": "",
@@ -1360,7 +1436,11 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
         ),
     )
     totals = daily_totals(conn, int(goal["id"]), today_key())
-    if totals["items"] >= int(goal.get("daily_target") or 1):
+    if is_kgrowth_goal(goal) and evaluation["ok"]:
+        status = "completed"
+        note = f"kgrowth improvement completed permanently: {evaluation['note'] or goal['goal_name']}"
+        cooldown_until = ""
+    elif totals["items"] >= int(goal.get("daily_target") or 1):
         status = "complete_today"
         note = f"daily target complete: {totals['items']}/{goal['daily_target']}"
         cooldown_until = ""
@@ -1428,7 +1508,7 @@ def status() -> dict[str, Any]:
 
 def set_goal_status(goal_name: str, status_value: str) -> dict[str, Any]:
     init_db()
-    if status_value not in {"waiting", "hold", "cooldown", "complete_today", "limit_today"}:
+    if status_value not in {"waiting", "hold", "cooldown", "complete_today", "limit_today", "completed"}:
         raise ValueError("invalid goal status")
     with connect() as conn:
         conn.execute(
