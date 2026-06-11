@@ -541,8 +541,7 @@ def init_db() -> None:
                     cooldown_seconds = excluded.cooldown_seconds,
                     priority = excluded.priority,
                     enabled = excluded.enabled,
-                    payload = excluded.payload,
-                    updated_at = excluded.updated_at
+                    payload = excluded.payload
                 """,
                 (
                     goal["goal_name"],
@@ -642,8 +641,7 @@ def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = N
                     WHEN goals.enabled = 0 AND goals.status = 'hold' THEN excluded.last_note
                     ELSE goals.last_note
                 END,
-                payload = excluded.payload,
-                updated_at = excluded.updated_at
+                payload = excluded.payload
             """,
             (
                 goal_name,
@@ -789,6 +787,25 @@ def enable_executable_kgrowth_goals(conn: sqlite3.Connection) -> dict[str, Any]:
         meta["priority_class"] = "interactive"
         payload["kwargs"] = kwargs
         payload["meta"] = meta
+        payload_json = json.dumps(payload, ensure_ascii=False)
+        desired_note = f"kgrowth executable kind enabled: {kind}"
+        current_note = str(goal.get("last_note") or "")
+        should_replace_note = not (
+            str(goal.get("status") or "") in {"complete_today", "limit_today", "running", "cooldown"}
+            and current_note
+            and "未実装" not in current_note
+            and "実装されるまで" not in current_note
+        )
+        needs_update = (
+            int(goal.get("enabled") or 0) != 1
+            or str(goal.get("status") or "") == "hold"
+            or str(goal.get("queue") or "") != "ollama-192-168-0-14-web"
+            or json.dumps(goal.get("payload") or {}, ensure_ascii=False) != payload_json
+            or (should_replace_note and current_note != desired_note)
+        )
+        if not needs_update:
+            enabled += 1
+            continue
         conn.execute(
             """
             UPDATE goals
@@ -797,15 +814,15 @@ def enable_executable_kgrowth_goals(conn: sqlite3.Connection) -> dict[str, Any]:
                 queue = 'ollama-192-168-0-14-web',
                 payload = ?,
                 last_note = CASE
-                    WHEN status IN ('complete_today', 'running', 'cooldown') AND last_note != '' AND last_note NOT LIKE '%未実装%' AND last_note NOT LIKE '%実装されるまで%' THEN last_note
+                    WHEN status IN ('complete_today', 'limit_today', 'running', 'cooldown') AND last_note != '' AND last_note NOT LIKE '%未実装%' AND last_note NOT LIKE '%実装されるまで%' THEN last_note
                     ELSE ?
                 END,
                 updated_at = ?
             WHERE id = ?
             """,
             (
-                json.dumps(payload, ensure_ascii=False),
-                f"kgrowth executable kind enabled: {kind}",
+                payload_json,
+                desired_note,
                 utc_now(),
                 goal["id"],
             ),
@@ -924,8 +941,74 @@ def last_goal_run(conn: sqlite3.Connection, goal_id: int) -> dict[str, Any]:
     return row_dict(row)
 
 
-def enrich_goal_for_status(goal: dict[str, Any], totals: dict[str, int], last_run: dict[str, Any], now: dt.datetime) -> dict[str, Any]:
+def daily_target_reached(goal: dict[str, Any], totals: dict[str, int]) -> bool:
+    target = int(goal.get("daily_target") or 0)
+    return target > 0 and int(totals.get("items") or 0) >= target
+
+
+def daily_run_limit_reached(goal: dict[str, Any], totals: dict[str, int]) -> bool:
+    max_runs = int(goal.get("max_runs_per_day") or 0)
+    return max_runs > 0 and int(totals.get("runs") or 0) >= max_runs
+
+
+def effective_goal_status(goal: dict[str, Any], totals: dict[str, int], now: dt.datetime) -> str:
+    raw_status = str(goal.get("status") or "waiting")
+    if raw_status in {"running", "hold"}:
+        return raw_status
+    if daily_target_reached(goal, totals):
+        return "complete_today"
+    if daily_run_limit_reached(goal, totals):
+        return "limit_today"
+    cooldown_until = parse_iso_datetime(goal.get("cooldown_until"))
+    if cooldown_until and cooldown_until > now:
+        return "cooldown"
+    if raw_status in {"complete_today", "limit_today", "cooldown"}:
+        return "waiting"
+    return raw_status or "waiting"
+
+
+def reconcile_goal_for_today(conn: sqlite3.Connection, goal: dict[str, Any], totals: dict[str, int], now: dt.datetime) -> bool:
     status_value = str(goal.get("status") or "waiting")
+    if status_value in {"running", "hold"}:
+        return False
+    desired_status = effective_goal_status(goal, totals, now)
+    desired_note = str(goal.get("last_note") or "")
+    desired_cooldown_until = str(goal.get("cooldown_until") or "")
+    desired_current_job_id = str(goal.get("current_job_id") or "")
+    if desired_status == "complete_today":
+        desired_note = f"daily target complete: {totals['items']}/{goal['daily_target']}"
+        desired_cooldown_until = ""
+        desired_current_job_id = ""
+    elif desired_status == "limit_today":
+        desired_note = f"daily run limit reached: runs={totals['runs']} items={totals['items']}/{goal['daily_target']}"
+        desired_cooldown_until = ""
+        desired_current_job_id = ""
+    elif desired_status == "waiting" and status_value in {"complete_today", "limit_today", "cooldown"}:
+        desired_note = "new day or cooldown elapsed; goal is eligible again"
+        desired_cooldown_until = ""
+        desired_current_job_id = ""
+
+    if (
+        desired_status == status_value
+        and desired_note == str(goal.get("last_note") or "")
+        and desired_cooldown_until == str(goal.get("cooldown_until") or "")
+        and desired_current_job_id == str(goal.get("current_job_id") or "")
+    ):
+        return False
+    conn.execute(
+        """
+        UPDATE goals
+        SET status = ?, current_job_id = ?, last_note = ?, cooldown_until = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (desired_status, desired_current_job_id, desired_note, desired_cooldown_until, utc_now(), goal["id"]),
+    )
+    return True
+
+
+def enrich_goal_for_status(goal: dict[str, Any], totals: dict[str, int], last_run: dict[str, Any], now: dt.datetime) -> dict[str, Any]:
+    raw_status = str(goal.get("status") or "waiting")
+    status_value = effective_goal_status(goal, totals, now)
     target = int(goal.get("daily_target") or 0)
     max_runs = int(goal.get("max_runs_per_day") or 0)
     remaining_items = max(0, target - int(totals.get("items") or 0))
@@ -945,21 +1028,30 @@ def enrich_goal_for_status(goal: dict[str, Any], totals: dict[str, int], last_ru
         next_action = "保留"
         next_reason = str(goal.get("last_note") or "手動で保留中")
     elif status_value == "complete_today":
-        next_action = "本日完了"
-        next_reason = "翌日のGoal Queueで再び実行候補になります"
+        next_action = "本日目標達成"
+        next_reason = f"今日の目標達成: {totals['items']}/{target}"
+    elif status_value == "limit_today":
+        next_action = "本日実行上限"
+        next_reason = f"実行上限到達: runs={totals['runs']}/{max_runs}, items={totals['items']}/{target}"
     elif cooldown_remaining > 0:
         next_eligible_at = cooldown_until.isoformat() if cooldown_until else ""
         next_action = "冷却中"
         next_reason = f"{cooldown_remaining}秒後に実行候補"
     else:
-        next_eligible_at = now.isoformat()
-        next_action = "次回tickで実行候補"
-        if status_value == "cooldown":
-            next_reason = "冷却は終了済み"
-        else:
-            next_reason = "待機中"
+        next_action = "実行候補"
+        next_reason = "次回tickで実行候補"
 
     enriched = dict(goal)
+    enriched["raw_status"] = raw_status
+    enriched["status"] = status_value
+    enriched["status_label"] = {
+        "waiting": "待機",
+        "running": "実行中",
+        "cooldown": "冷却中",
+        "complete_today": "本日目標達成",
+        "limit_today": "本日上限",
+        "hold": "保留",
+    }.get(status_value, status_value)
     enriched["today"] = {
         **totals,
         "remaining_items": remaining_items,
@@ -991,6 +1083,7 @@ def build_status_summary(goals: list[dict[str, Any]], rq_summary: dict[str, Any]
         "cooling_down": 0,
         "cooldown_ready": 0,
         "complete_today": 0,
+        "limit_today": 0,
         "hold": 0,
         "rq_waiting": int(live.get("queued") or 0),
         "rq_running": int(live.get("started") or 0),
@@ -999,7 +1092,7 @@ def build_status_summary(goals: list[dict[str, Any]], rq_summary: dict[str, Any]
         "next_eligible_at": "",
         "next_action": "",
     }
-    next_candidates: list[tuple[str, str, str]] = []
+    next_candidates: list[tuple[int, str, str, str]] = []
     for goal in goals:
         status_value = str(goal.get("status") or "waiting")
         if status_value in summary:
@@ -1008,10 +1101,12 @@ def build_status_summary(goals: list[dict[str, Any]], rq_summary: dict[str, Any]
             summary["cooling_down"] += 1
         elif status_value == "cooldown":
             summary["cooldown_ready"] += 1
-        if goal.get("next_eligible_at"):
-            next_candidates.append((str(goal["next_eligible_at"]), str(goal.get("goal_name") or ""), str(goal.get("next_action") or "")))
+        if status_value == "waiting":
+            next_candidates.append((0, str(goal.get("next_eligible_at") or ""), str(goal.get("goal_name") or ""), str(goal.get("next_action") or "")))
+        elif goal.get("next_eligible_at"):
+            next_candidates.append((1, str(goal["next_eligible_at"]), str(goal.get("goal_name") or ""), str(goal.get("next_action") or "")))
     if next_candidates:
-        next_at, goal_name, action = sorted(next_candidates)[0]
+        _, next_at, goal_name, action = sorted(next_candidates)[0]
         summary["next_goal_name"] = goal_name
         summary["next_eligible_at"] = next_at
         summary["next_action"] = action
@@ -1270,8 +1365,8 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
         note = f"daily target complete: {totals['items']}/{goal['daily_target']}"
         cooldown_until = ""
     elif totals["runs"] >= int(goal.get("max_runs_per_day") or 1):
-        status = "complete_today"
-        note = f"max runs reached: runs={totals['runs']} items={totals['items']}/{goal['daily_target']}"
+        status = "limit_today"
+        note = f"daily run limit reached: runs={totals['runs']} items={totals['items']}/{goal['daily_target']}"
         cooldown_until = ""
     elif evaluation["ok"]:
         status = "cooldown"
@@ -1294,12 +1389,8 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
 
 
 def cooldown_ready(goal: dict[str, Any]) -> bool:
-    value = str(goal.get("cooldown_until") or "")
-    if not value:
-        return True
-    try:
-        until = dt.datetime.fromisoformat(value)
-    except ValueError:
+    until = parse_iso_datetime(goal.get("cooldown_until"))
+    if until is None:
         return True
     return dt.datetime.now(dt.timezone.utc) >= until
 
@@ -1308,14 +1399,16 @@ def status() -> dict[str, Any]:
     init_db()
     rq_summary = rq_get("/api/summary", timeout=12) if RQDB4AI_API_TOKEN else {"ok": False, "error": "RQDB4AI token is not configured"}
     with connect() as conn:
-        for row in conn.execute("SELECT * FROM goals WHERE goal_name LIKE 'kgrowth-%' AND status = 'running' ORDER BY priority, id").fetchall():
+        for row in conn.execute("SELECT * FROM goals WHERE enabled = 1 AND status = 'running' ORDER BY priority, id").fetchall():
             refresh_running_goal(conn, row_dict(row))
         day = today_key()
         now = dt.datetime.now(dt.timezone.utc)
         goals = []
-        for row in conn.execute("SELECT * FROM goals WHERE goal_name LIKE 'kgrowth-%' AND enabled = 1 ORDER BY priority, id").fetchall():
+        for row in conn.execute("SELECT * FROM goals WHERE enabled = 1 ORDER BY priority, id").fetchall():
             goal = row_dict(row)
             totals = daily_totals(conn, int(goal["id"]), day)
+            if reconcile_goal_for_today(conn, goal, totals, now):
+                goal = row_dict(conn.execute("SELECT * FROM goals WHERE id = ?", (goal["id"],)).fetchone())
             latest = last_goal_run(conn, int(goal["id"]))
             goals.append(enrich_goal_for_status(goal, totals, latest, now))
         events = [row_dict(row) for row in conn.execute("SELECT * FROM controller_events ORDER BY id DESC LIMIT 30").fetchall()]
@@ -1335,7 +1428,7 @@ def status() -> dict[str, Any]:
 
 def set_goal_status(goal_name: str, status_value: str) -> dict[str, Any]:
     init_db()
-    if status_value not in {"waiting", "hold", "cooldown", "complete_today"}:
+    if status_value not in {"waiting", "hold", "cooldown", "complete_today", "limit_today"}:
         raise ValueError("invalid goal status")
     with connect() as conn:
         conn.execute(

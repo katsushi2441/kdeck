@@ -95,7 +95,9 @@ def main() -> None:
         },
         "recommended_primary_command": "python3 -m app.commander_tool growth-cycle",
         "notes": [
-            "Use kdeck commander_tool for state-changing operations.",
+            "Use kdeck commander_tool for all Goal Queue state-changing operations.",
+            "Non-kgrowth goals run until their same-day business targets are met.",
+            "kgrowth stays in a 24/365 log-analysis -> plan -> improvement-job loop.",
             "Use Codex/OpenClaw only when an implementation is missing.",
             "Do not enqueue if a goal is running.",
         ],

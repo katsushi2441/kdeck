@@ -8,6 +8,7 @@ from typing import Any
 
 from app import controller
 
+ENABLED_GOALS = "enabled = 1"
 KGROWTH_ENABLED = "enabled = 1 AND goal_name LIKE 'kgrowth-%'"
 
 
@@ -57,7 +58,7 @@ def command_refresh(_args: argparse.Namespace) -> None:
     controller.init_db()
     changed: list[dict[str, Any]] = []
     with controller.connect() as conn:
-        rows = conn.execute(f"SELECT * FROM goals WHERE {KGROWTH_ENABLED} AND status = 'running' ORDER BY priority, id").fetchall()
+        rows = conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id").fetchall()
         for row in rows:
             goal = controller.row_dict(row)
             changed.append({
@@ -73,7 +74,7 @@ def command_brief(_args: argparse.Namespace) -> None:
     controller.init_db()
     changed: list[dict[str, Any]] = []
     with controller.connect() as conn:
-        rows = conn.execute(f"SELECT * FROM goals WHERE {KGROWTH_ENABLED} AND status = 'running' ORDER BY priority, id").fetchall()
+        rows = conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id").fetchall()
         for row in rows:
             goal = controller.row_dict(row)
             changed.append({
@@ -84,13 +85,13 @@ def command_brief(_args: argparse.Namespace) -> None:
         goals = []
         running_goal: dict[str, Any] | None = None
         first_eligible_goal: dict[str, Any] | None = None
-        for row in conn.execute(f"SELECT * FROM goals WHERE {KGROWTH_ENABLED} ORDER BY priority, id").fetchall():
+        for row in conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} ORDER BY priority, id").fetchall():
             goal = controller.row_dict(row)
             totals = controller.daily_totals(conn, int(goal["id"]), day)
             blocked_reason = ""
-            if totals["items"] >= int(goal.get("daily_target") or 1):
+            if controller.daily_target_reached(goal, totals):
                 blocked_reason = "daily_target_complete"
-            elif totals["runs"] >= int(goal.get("max_runs_per_day") or 1):
+            elif controller.daily_run_limit_reached(goal, totals):
                 blocked_reason = "max_runs_reached"
             elif str(goal.get("status")) == "hold":
                 blocked_reason = "hold"
@@ -99,7 +100,7 @@ def command_brief(_args: argparse.Namespace) -> None:
             elif not controller.cooldown_ready(goal):
                 blocked_reason = "cooldown"
             display_status = str(goal.get("status") or "")
-            if not blocked_reason and display_status == "complete_today":
+            if not blocked_reason and display_status in {"complete_today", "limit_today", "cooldown"}:
                 display_status = "waiting"
             brief_goal = {
                 "goal_name": goal["goal_name"],
@@ -133,25 +134,17 @@ def command_brief(_args: argparse.Namespace) -> None:
 
 def command_enqueue(args: argparse.Namespace) -> None:
     controller.init_db()
-    if not args.goal_name.startswith("kgrowth-"):
-        print_json({
-            "ok": False,
-            "error": "not_kgrowth_goal",
-            "goal_name": args.goal_name,
-            "note": "kdeck commander only enqueues kgrowth improvement goals; app workers are owned by their own projects.",
-        })
-        return
     with controller.connect() as conn:
-        active = conn.execute(f"SELECT goal_name, current_job_id FROM goals WHERE {KGROWTH_ENABLED} AND status = 'running' ORDER BY priority, id").fetchone()
+        active = conn.execute(f"SELECT goal_name, current_job_id FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id").fetchone()
         if active is not None:
             print_json({"ok": False, "error": "another_goal_running", "running": dict(active)})
             return
         goal = goal_by_name(conn, args.goal_name)
         totals = controller.daily_totals(conn, int(goal["id"]), controller.today_key())
-        if totals["items"] >= int(goal.get("daily_target") or 1):
+        if controller.daily_target_reached(goal, totals):
             print_json({"ok": False, "error": "daily_target_complete", "goal_name": goal["goal_name"], "today": totals})
             return
-        if totals["runs"] >= int(goal.get("max_runs_per_day") or 1):
+        if controller.daily_run_limit_reached(goal, totals):
             print_json({"ok": False, "error": "max_runs_reached", "goal_name": goal["goal_name"], "today": totals})
             return
         if str(goal.get("status")) == "hold":
@@ -167,7 +160,7 @@ def command_enqueue(args: argparse.Namespace) -> None:
 def command_run_once(_args: argparse.Namespace) -> None:
     controller.init_db()
     with controller.connect() as conn:
-        running_rows = conn.execute(f"SELECT * FROM goals WHERE {KGROWTH_ENABLED} AND status = 'running' ORDER BY priority, id").fetchall()
+        running_rows = conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id").fetchall()
         refreshed: list[dict[str, Any]] = []
         for row in running_rows:
             goal = controller.row_dict(row)
@@ -176,25 +169,25 @@ def command_run_once(_args: argparse.Namespace) -> None:
                 "changed": controller.refresh_running_goal(conn, goal),
             })
 
-        running = conn.execute(f"SELECT goal_name, current_job_id FROM goals WHERE {KGROWTH_ENABLED} AND status = 'running' ORDER BY priority, id LIMIT 1").fetchone()
+        running = conn.execute(f"SELECT goal_name, current_job_id FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id LIMIT 1").fetchone()
         if running is not None:
             print_json({"ok": True, "action": "wait_running", "running": dict(running), "refresh": refreshed})
             return
 
         day = controller.today_key()
-        for row in conn.execute(f"SELECT * FROM goals WHERE {KGROWTH_ENABLED} ORDER BY priority, id").fetchall():
+        for row in conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} ORDER BY priority, id").fetchall():
             goal = controller.row_dict(row)
             totals = controller.daily_totals(conn, int(goal["id"]), day)
-            if totals["items"] >= int(goal.get("daily_target") or 1):
+            if controller.daily_target_reached(goal, totals):
                 conn.execute(
                     "UPDATE goals SET status = 'complete_today', last_note = ?, updated_at = ? WHERE id = ?",
                     (f"daily target complete: {totals['items']}/{goal['daily_target']}", controller.utc_now(), goal["id"]),
                 )
                 continue
-            if totals["runs"] >= int(goal.get("max_runs_per_day") or 1):
+            if controller.daily_run_limit_reached(goal, totals):
                 conn.execute(
-                    "UPDATE goals SET status = 'complete_today', last_note = ?, updated_at = ? WHERE id = ?",
-                    (f"max runs reached: runs={totals['runs']} items={totals['items']}/{goal['daily_target']}", controller.utc_now(), goal["id"]),
+                    "UPDATE goals SET status = 'limit_today', last_note = ?, updated_at = ? WHERE id = ?",
+                    (f"daily run limit reached: runs={totals['runs']} items={totals['items']}/{goal['daily_target']}", controller.utc_now(), goal["id"]),
                 )
                 continue
             if str(goal.get("status")) == "hold":
@@ -233,7 +226,7 @@ def should_force_kgrowth_after_completion(conn: sqlite3.Connection, day: str) ->
 def command_growth_cycle(args: argparse.Namespace) -> None:
     controller.init_db()
     with controller.connect() as conn:
-        running_rows = conn.execute(f"SELECT * FROM goals WHERE {KGROWTH_ENABLED} AND status = 'running' ORDER BY priority, id").fetchall()
+        running_rows = conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id").fetchall()
         refreshed: list[dict[str, Any]] = []
         for row in running_rows:
             goal = controller.row_dict(row)
@@ -242,25 +235,25 @@ def command_growth_cycle(args: argparse.Namespace) -> None:
                 "changed": controller.refresh_running_goal(conn, goal),
             })
 
-        running = conn.execute(f"SELECT goal_name, current_job_id FROM goals WHERE {KGROWTH_ENABLED} AND status = 'running' ORDER BY priority, id LIMIT 1").fetchone()
+        running = conn.execute(f"SELECT goal_name, current_job_id FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id LIMIT 1").fetchone()
         if running is not None:
             print_json({"ok": True, "action": "wait_running", "running": dict(running), "refresh": refreshed})
             return
 
         day = controller.today_key()
-        for row in conn.execute(f"SELECT * FROM goals WHERE {KGROWTH_ENABLED} ORDER BY priority, id").fetchall():
+        for row in conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} ORDER BY priority, id").fetchall():
             goal = controller.row_dict(row)
             totals = controller.daily_totals(conn, int(goal["id"]), day)
-            if totals["items"] >= int(goal.get("daily_target") or 1):
+            if controller.daily_target_reached(goal, totals):
                 conn.execute(
                     "UPDATE goals SET status = 'complete_today', last_note = ?, updated_at = ? WHERE id = ?",
                     (f"daily target complete: {totals['items']}/{goal['daily_target']}", controller.utc_now(), goal["id"]),
                 )
                 continue
-            if totals["runs"] >= int(goal.get("max_runs_per_day") or 1):
+            if controller.daily_run_limit_reached(goal, totals):
                 conn.execute(
-                    "UPDATE goals SET status = 'complete_today', last_note = ?, updated_at = ? WHERE id = ?",
-                    (f"max runs reached: runs={totals['runs']} items={totals['items']}/{goal['daily_target']}", controller.utc_now(), goal["id"]),
+                    "UPDATE goals SET status = 'limit_today', last_note = ?, updated_at = ? WHERE id = ?",
+                    (f"daily run limit reached: runs={totals['runs']} items={totals['items']}/{goal['daily_target']}", controller.utc_now(), goal["id"]),
                 )
                 continue
             if str(goal.get("status")) == "hold":
@@ -284,7 +277,6 @@ def command_growth_cycle(args: argparse.Namespace) -> None:
             SELECT goal_name, cooldown_until
             FROM goals
             WHERE enabled = 1
-              AND goal_name LIKE 'kgrowth-%'
               AND status = 'cooldown'
               AND cooldown_until != ''
             ORDER BY cooldown_until, priority, id
@@ -311,12 +303,12 @@ def command_growth_cycle(args: argparse.Namespace) -> None:
         sync = controller.sync_kgrowth_improvement_goals(conn)
         enabled = controller.enable_executable_kgrowth_goals(conn)
         enqueued = None
-        for row in conn.execute(f"SELECT * FROM goals WHERE {KGROWTH_ENABLED} ORDER BY priority, id").fetchall():
+        for row in conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} ORDER BY priority, id").fetchall():
             goal = controller.row_dict(row)
             totals = controller.daily_totals(conn, int(goal["id"]), day)
-            if totals["items"] >= int(goal.get("daily_target") or 1):
+            if controller.daily_target_reached(goal, totals):
                 continue
-            if totals["runs"] >= int(goal.get("max_runs_per_day") or 1):
+            if controller.daily_run_limit_reached(goal, totals):
                 continue
             if str(goal.get("status")) == "hold" or not controller.cooldown_ready(goal):
                 continue

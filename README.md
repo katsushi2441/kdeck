@@ -179,23 +179,34 @@ Operational rules:
 
 ## Goal Queue Runner
 
-kdeck owns the operational command loop that replaces the old time-based
-Hermes enqueue schedules on `192.168.0.2` for kgrowth-driven improvement work.
+kdeck owns the operational command loop for all configured production goals,
+including app workers such as market-pipeline, Horizon, BuzBlogger, URL2AI,
+AIxTube-related batches, and kgrowth-driven improvement work.
 
 - `kdeck-python-goal-runner.service` currently runs on `192.168.0.3`.
-- Python stores state in `storage/controller.sqlite`, refreshes running kgrowth jobs, and enqueues the next eligible kgrowth improvement goal.
+- Python stores state in `storage/controller.sqlite`, refreshes running jobs, and enqueues the next eligible goal.
 - `kdeck-hermes-commander.service` is the main 24/365 commander loop.
-- Hermes keeps a persistent session named `kdeck-growth-commander`, observes Goal Queue state, decides one safe next action, executes it through `app.commander_tool`, and records the decision.
+- Hermes keeps a persistent session named `kdeck-goal-commander`, observes Goal Queue state, decides one safe next action, executes it through `app.commander_tool`, and records the decision.
 - Python is the safe action surface. Hermes is the operator/planner. It must not become a hidden one-off shell script or a plain cron wrapper.
 - RQDB4AI remains the generic execution layer.
-- Hermes on `192.168.0.2` is no longer the scheduler. Its cron-like jobs are paused, while OpenClaw remains available for delegated server work.
+- The old Hermes cron-like schedules are replaced by kdeck Goal Queue state and rqdb4ai execution. OpenClaw remains available for delegated server work.
 - A goal is complete only when its business result meets the goal rule, not when RQDB4AI accepted the enqueue request.
 
-kdeck is not the owner of app worker schedules such as market-pipeline,
-Horizon, BuzBlogger, URL2AI, or AIxTube batch generation. Those workers keep
-running under their owning projects. kdeck must not pause, hold, or stop those
-external app workers. kdeck's growth commander consumes kgrowth analysis, turns
-it into improvement jobs, and sends only those kgrowth jobs to RQDB4AI.
+kdeck is the owner of app worker schedules such as market-pipeline, Horizon,
+BuzBlogger, URL2AI, and AIxTube batch generation. The app repositories own the
+job implementation code, while kdeck owns goal state, scheduling, hold/resume,
+cooldown, daily targets, and enqueue decisions. rqdb4ai owns generic queue
+execution and job status visibility.
+
+Goal Queue has two broad classes:
+
+- `kgrowth-*` goals run as a 24/365 loop: log analysis, improvement-plan
+  generation, improvement-job execution, then log analysis again.
+- Non-kgrowth production goals run until their same-day targets are met. For
+  example, `aixec-market-pipeline` targets 4000 new products/day, while
+  `url2ai-oss`, `url2ai-finreport`, `url2ai-polymarket`,
+  `aixec-register-market-worker`, `horizon-worker`, `buzblogger`, and
+  `aixec-growth-agent` each have their own daily target and run limits.
 
 Operational tool surface:
 
@@ -223,7 +234,7 @@ python3 -m app.commander_tool run-once
 `blocked_reason`. `run-once` refreshes running jobs, waits if anything is
 running, and otherwise enqueues one eligible goal.
 
-Hermes growth commander turn:
+Hermes goal commander turn:
 
 ```bash
 scripts/hermes_growth_commander_once.sh
@@ -251,7 +262,7 @@ the Hermes Agent loop.
 Commander API:
 
 - `GET /api/controller/status`
-- `POST /api/controller/tick` runs one Hermes growth commander turn
+- `POST /api/controller/tick` runs one Hermes goal commander turn
 - `POST /api/controller/goals/{goal_name}/hold`
 - `POST /api/controller/goals/{goal_name}/resume`
 

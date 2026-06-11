@@ -21,9 +21,9 @@ ${CONTEXT}
 
 Take exactly one commander turn now."
 
-echo "===== $(date --iso-8601=seconds) hermes growth commander =====" | tee -a storage/hermes_growth_commander.log
+echo "===== $(date --iso-8601=seconds) hermes goal commander =====" | tee -a storage/hermes_growth_commander.log
 
-SESSION_TITLE="kdeck-growth-commander"
+SESSION_TITLE="kdeck-goal-commander"
 HERMES_COMMANDER_PROVIDER="${KDECK_HERMES_COMMANDER_PROVIDER:-}"
 HERMES_COMMANDER_MODEL="${KDECK_HERMES_COMMANDER_MODEL:-}"
 HERMES_COMMANDER_TIMEOUT="${KDECK_HERMES_COMMANDER_TIMEOUT_SECONDS:-180}"
@@ -45,7 +45,7 @@ OUTPUT=$(
   timeout "$HERMES_COMMANDER_TIMEOUT" hermes chat \
     "${SESSION_ARGS[@]}" \
     "${MODEL_ARGS[@]}" \
-    --source kdeck-growth-commander \
+    --source kdeck-goal-commander \
     --accept-hooks \
     --pass-session-id \
     --max-turns 60 \
