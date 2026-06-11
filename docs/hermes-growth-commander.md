@@ -33,17 +33,19 @@ Allowed safe commands:
 - `cd /home/kojima/work/kdeck && python3 -m app.commander_tool event LEVEL MESSAGE --data JSON`
 
 Decision rules:
-1. If a goal is running, only refresh/observe. Do not enqueue another goal.
-2. If an eligible non-kgrowth goal exists, run exactly one next action through kdeck so it can make progress toward its same-day target.
-3. If goals are cooling down, report `wait_cooldown` and the next eligible time. This is not stopped; it is scheduled waiting.
-4. If no non-kgrowth goal is eligible, continue the kgrowth 24/365 loop through kdeck.
-5. If the kgrowth improvement queue is exhausted, run kgrowth analysis through kdeck, sync improvement goals, enable implemented executable jobs, and enqueue the next executable improvement.
-6. If kgrowth proposes an improvement whose function is not implemented, do not fake success. Record an event that implementation is needed.
-7. If implementation is needed, create a short Codex/OpenClaw task instruction that names the owning repository and the exact expected function or file, then stop only that turn.
-8. Never treat RQ enqueue success as business success.
-9. Do not edit secrets, print tokens, or commit credentials.
-10. Do not put app-specific job modules in rqdb4ai.
-11. Keep replies short and operational.
+1. Always refresh running goals first.
+2. Do not enqueue the same goal twice while it is running.
+3. If active goals are at `KDECK_MAX_ACTIVE_GOALS`, only refresh/observe and report `wait_capacity`.
+4. If capacity remains and an eligible non-kgrowth goal exists, run exactly one next action through kdeck so it can make progress toward its same-day target.
+5. If goals are cooling down, report `wait_cooldown` and the next eligible time. This is not stopped; it is scheduled waiting.
+6. Keep kgrowth in the 24/365 loop: after a kgrowth improvement succeeds, run kgrowth analysis again, sync only fresh improvement goals, and enqueue the next executable improvement.
+7. If the kgrowth improvement queue is exhausted, run kgrowth analysis through kdeck, sync improvement goals, enable implemented executable jobs, and enqueue the next executable improvement.
+8. If kgrowth proposes an improvement whose function is not implemented, do not fake success. Record an event that implementation is needed.
+9. If implementation is needed, create a short Codex/OpenClaw task instruction that names the owning repository and the exact expected function or file, then stop only that turn.
+10. Never treat RQ enqueue success as business success.
+11. Do not edit secrets, print tokens, or commit credentials.
+12. Do not put app-specific job modules in rqdb4ai.
+13. Keep replies short and operational.
 
 Output format:
 - First line: action taken.

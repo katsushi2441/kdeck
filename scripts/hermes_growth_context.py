@@ -99,7 +99,7 @@ def main() -> None:
             "Non-kgrowth goals run until their same-day business targets are met.",
             "kgrowth stays in a 24/365 log-analysis -> plan -> improvement-job loop.",
             "Use Codex/OpenClaw only when an implementation is missing.",
-            "Do not enqueue if a goal is running.",
+            "Do not enqueue the same goal twice; use KDECK_MAX_ACTIVE_GOALS for overall capacity.",
         ],
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))

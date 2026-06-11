@@ -231,8 +231,9 @@ python3 -m app.commander_tool run-once
 ```
 
 `brief` returns a small JSON object with `next_goal`, `eligible`, and
-`blocked_reason`. `run-once` refreshes running jobs, waits if anything is
-running, and otherwise enqueues one eligible goal.
+`blocked_reason`. `run-once` refreshes running jobs, never enqueues the same
+goal twice, respects `KDECK_MAX_ACTIVE_GOALS`, and otherwise enqueues one
+eligible goal.
 
 Hermes goal commander turn:
 
