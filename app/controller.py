@@ -1284,6 +1284,15 @@ def _nested_dict(source: dict[str, Any], *keys: str) -> dict[str, Any]:
     return current if isinstance(current, dict) else {}
 
 
+def job_error_note(job: dict[str, Any]) -> str:
+    error = job.get("error") if isinstance(job.get("error"), dict) else {}
+    for key in ("message", "summary", "label"):
+        value = error.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
 def job_items(job: dict[str, Any], result: dict[str, Any], goal: dict[str, Any] | None = None) -> int:
     if goal and goal.get("goal_name") == "aixec-market-pipeline":
         # market-pipeline's goal is new product creation. Registered/selected
@@ -1316,7 +1325,8 @@ def evaluate_job(job: dict[str, Any], goal: dict[str, Any]) -> dict[str, Any]:
     result_status = str(result.get("status") or lifecycle.get("state") or rq_status).lower()
     items = job_items(job, result, goal)
     terminal = bool(lifecycle.get("terminal", rq_status in {"finished", "failed", "stopped", "canceled"}))
-    note = str(result.get("note") or lifecycle.get("note") or "")
+    error_note = job_error_note(job)
+    note = str(result.get("note") or (error_note if rq_status in {"failed", "stopped", "canceled"} else "") or lifecycle.get("note") or error_note or "")
     if rq_status in {"queued", "started", "deferred", "scheduled"} or not terminal:
         return {"terminal": False, "ok": False, "status": rq_status or "running", "items": items, "note": note, "result": result}
     if rq_status in {"failed", "stopped", "canceled"} or result_status in {"failed", "error", "down"}:
@@ -1518,7 +1528,10 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
     else:
         status = "cooldown"
         cooldown_until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=max(600, int(goal.get("cooldown_seconds") or DEFAULT_COOLDOWN_SECONDS)))).isoformat()
+        reason = str(evaluation.get("note") or "").strip()
         note = f"under target or failed: +{evaluation['items']} items, retry after cooldown"
+        if reason:
+            note += f" / {reason}"
     conn.execute(
         """
         UPDATE goals
