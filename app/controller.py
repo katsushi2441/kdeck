@@ -578,6 +578,7 @@ def daily_totals(conn: sqlite3.Connection, goal_id: int, day: str) -> dict[str, 
         SELECT COUNT(*) AS runs, COALESCE(SUM(items), 0) AS items
         FROM goal_runs
         WHERE goal_id = ? AND day = ? AND finished_at != ''
+          AND business_status != 'canceled'
         """,
         (goal_id, day),
     ).fetchone()
@@ -643,6 +644,33 @@ def daily_run_limit_reached(goal: dict[str, Any], totals: dict[str, int]) -> boo
     return max_runs > 0 and int(totals.get("runs") or 0) >= max_runs
 
 
+def cooldown_until_from_last_run(conn: sqlite3.Connection, goal: dict[str, Any], now: dt.datetime) -> str:
+    if is_kgrowth_goal(goal):
+        return ""
+    cooldown_seconds = int(goal.get("cooldown_seconds") or DEFAULT_COOLDOWN_SECONDS)
+    if cooldown_seconds <= 0:
+        return ""
+    row = conn.execute(
+        """
+        SELECT *
+        FROM goal_runs
+        WHERE goal_id = ?
+          AND (ok = 1 OR business_status = 'ok' OR items > 0)
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (int(goal["id"]),),
+    ).fetchone()
+    last_run = row_dict(row)
+    if not last_run:
+        return ""
+    finished_at = parse_iso_datetime(last_run.get("finished_at"))
+    if not finished_at:
+        return ""
+    cooldown_until = finished_at + dt.timedelta(seconds=cooldown_seconds)
+    return cooldown_until.isoformat() if cooldown_until > now else ""
+
+
 def effective_goal_status(goal: dict[str, Any], totals: dict[str, int], now: dt.datetime) -> str:
     raw_status = str(goal.get("status") or "waiting")
     if raw_status in {"running", "hold", "completed"}:
@@ -688,10 +716,17 @@ def reconcile_goal_for_today(conn: sqlite3.Connection, goal: dict[str, Any], tot
         desired_note = f"daily run limit reached: runs={totals['runs']} items={totals['items']}/{goal['daily_target']}"
         desired_cooldown_until = ""
         desired_current_job_id = ""
-    elif desired_status == "waiting" and status_value in {"complete_today", "limit_today", "cooldown"}:
-        desired_note = "new day or cooldown elapsed; goal is eligible again"
-        desired_cooldown_until = ""
-        desired_current_job_id = ""
+    elif desired_status == "waiting":
+        restored_cooldown_until = cooldown_until_from_last_run(conn, goal, now)
+        if restored_cooldown_until:
+            desired_status = "cooldown"
+            desired_note = f"cooldown after last run until {restored_cooldown_until}"
+            desired_cooldown_until = restored_cooldown_until
+            desired_current_job_id = ""
+        elif status_value in {"complete_today", "limit_today", "cooldown"}:
+            desired_note = "new day or cooldown elapsed; goal is eligible again"
+            desired_cooldown_until = ""
+            desired_current_job_id = ""
 
     if (
         desired_status == status_value
