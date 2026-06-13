@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/kojima/work/kdeck
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -f .env ]]; then
   set -a

@@ -22,13 +22,13 @@ DATA_DIR = Path(os.environ.get("KDECK_DATA_DIR", ROOT / "storage")).expanduser()
 DB_PATH = Path(os.environ.get("KDECK_CONTROLLER_DB", DATA_DIR / "controller.sqlite")).expanduser()
 RQDB4AI_API_URL = os.environ.get("KDECK_RQDB4AI_API_URL", os.environ.get("RQDB4AI_API_URL", "http://127.0.0.1:18300")).rstrip("/")
 RQDB4AI_API_TOKEN = os.environ.get("KDECK_RQDB4AI_API_TOKEN", os.environ.get("RQDB4AI_API_TOKEN", "")).strip()
-WORKER_STATUS_URL = os.environ.get("KDECK_WORKER_STATUS_URL", "https://aixec.exbridge.jp/api.php?path=worker/status")
+WORKER_STATUS_URL = os.environ.get("KDECK_WORKER_STATUS_URL", "")
 CONTROLLER_ENABLED = os.environ.get("KDECK_CONTROLLER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 DEFAULT_COOLDOWN_SECONDS = int(os.environ.get("KDECK_CONTROLLER_COOLDOWN_SECONDS", "900"))
-KGROWTH_IMPROVEMENT_JOBS_PATH = Path(
-    os.environ.get("KDECK_KGROWTH_IMPROVEMENT_JOBS", "/home/kojima/work/kgrowth/data/improvement_jobs_latest.json")
-).expanduser()
-KGROWTH_DIR = Path(os.environ.get("KDECK_KGROWTH_DIR", "/home/kojima/work/kgrowth")).expanduser()
+KGROWTH_IMPROVEMENT_JOBS_RAW = os.environ.get("KDECK_KGROWTH_IMPROVEMENT_JOBS", "").strip()
+KGROWTH_IMPROVEMENT_JOBS_PATH = Path(KGROWTH_IMPROVEMENT_JOBS_RAW).expanduser() if KGROWTH_IMPROVEMENT_JOBS_RAW else None
+KGROWTH_DIR_RAW = os.environ.get("KDECK_KGROWTH_DIR", "").strip()
+KGROWTH_DIR = Path(KGROWTH_DIR_RAW).expanduser() if KGROWTH_DIR_RAW else None
 KGROWTH_CONFIG = os.environ.get("KDECK_KGROWTH_CONFIG", "config.json")
 KGROWTH_MIN_INTERVAL_SECONDS = int(os.environ.get("KDECK_KGROWTH_MIN_INTERVAL_SECONDS", "21600"))
 MAX_ACTIVE_GOALS = int(os.environ.get("KDECK_MAX_ACTIVE_GOALS", "6"))
@@ -42,475 +42,41 @@ KGROWTH_EXECUTABLE_KINDS = {
 }
 
 
-MARKET_TASKS = [
-    {
-        "label": "高単価AI PC・ゲーミング",
-        "group": "ai_pc_gaming",
-        "genre_id": "",
-        "keywords": ["ゲーミングPC", "ミニPC", "GPU", "AI PC", "ワークステーション"],
-        "exclude_keywords": ["中古", "ジャンク"],
-        "target_count": 500,
-        "description_policy": "高単価でAmazon/Rakuten双方の購買につながりやすい商品を優先する",
-        "reason": "kdeck goal queue default market-pipeline task",
-    },
-    {
-        "label": "高単価ガジェット・家電",
-        "group": "premium_gadget",
-        "genre_id": "",
-        "keywords": ["ロボット掃除機", "ポータブル電源", "4Kモニター", "NAS", "ドローン"],
-        "exclude_keywords": ["中古", "ジャンク"],
-        "target_count": 500,
-        "description_policy": "単価が高く、AI/効率化文脈で紹介しやすい商品を優先する",
-        "reason": "kdeck goal queue retry market-pipeline task",
-    },
-    {
-        "label": "ビジネス効率化・オフィス機器",
-        "group": "office_productivity",
-        "genre_id": "",
-        "keywords": ["デスクチェア", "昇降デスク", "プロジェクター", "プリンター", "シュレッダー"],
-        "exclude_keywords": ["中古", "ジャンク"],
-        "target_count": 500,
-        "description_policy": "経営者・個人事業主が購入検討しやすい高単価商品を優先する",
-        "reason": "kdeck goal queue retry market-pipeline task",
-    },
-    {
-        "label": "防犯・見守りカメラ",
-        "group": "security_cameras",
-        "genre_id": "",
-        "keywords": [
-            "防犯カメラ 屋外", "防犯カメラ ワイヤレス", "防犯カメラ PoE", "防犯カメラ ソーラー",
-            "監視カメラ 屋外 防水", "ネットワークカメラ 屋外", "見守りカメラ", "ペットカメラ",
-            "ベビーモニター カメラ", "防犯カメラセット", "録画機 防犯カメラ", "ドアホン カメラ",
-            "スマートロック カメラ", "人感センサー カメラ", "暗視カメラ 屋外", "4K 防犯カメラ",
-            "防犯ライト カメラ", "屋外カメラ wifi", "防犯カメラ 工事不要", "AI検知 防犯カメラ",
-        ],
-        "exclude_keywords": ["中古", "ジャンク"],
-        "target_count": 500,
-        "description_policy": "防犯・店舗管理・見守り用途で比較しやすい商品を優先する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-    {
-        "label": "成分美容・スキンケア",
-        "group": "ingredient_skincare",
-        "genre_id": "",
-        "keywords": [
-            "レチノール 美容液", "ナイアシンアミド 美容液", "ビタミンC 美容液", "セラミド 化粧水",
-            "ヒアルロン酸 美容液", "CICA スキンケア", "アゼライン酸 美容液", "ペプチド 美容液",
-            "グルタチオン 美容液", "敏感肌 スキンケア", "毛穴 美容液", "保湿クリーム セラミド",
-            "日焼け止め 敏感肌", "クレンジングバーム", "フェイスパック 大容量", "導入美容液",
-            "美容液 ランキング", "韓国コスメ 美容液", "エイジングケア クリーム", "シートマスク 大容量",
-        ],
-        "exclude_keywords": ["中古", "ジャンク", "サンプル", "お試し"],
-        "target_count": 500,
-        "description_policy": "成分比較・悩み別選び方の記事化に向いた美容商品を優先する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-    {
-        "label": "健康管理・サプリ",
-        "group": "health_supplements",
-        "genre_id": "",
-        "keywords": [
-            "プロテイン 1kg", "プロテイン 3kg", "ホエイプロテイン", "ソイプロテイン",
-            "ビタミンD サプリ", "マルチビタミン", "亜鉛 サプリ", "鉄分 サプリ",
-            "乳酸菌 サプリ", "オメガ3 サプリ", "DHA EPA サプリ", "NMN サプリ",
-            "クレアチン", "EAA", "BCAA", "食物繊維 サプリ", "青汁", "睡眠 サプリ",
-            "血圧計 オムロン", "体組成計 タニタ", "スマートウォッチ 健康管理",
-        ],
-        "exclude_keywords": ["中古", "ジャンク", "お試し"],
-        "target_count": 500,
-        "description_policy": "健康管理・継続購入・比較需要がある商品を優先する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-    {
-        "label": "キッチン・時短家電",
-        "group": "kitchen_tools",
-        "genre_id": "",
-        "keywords": [
-            "電気圧力鍋", "ノンフライヤー", "ホットクック", "低温調理器", "炊飯器 5合",
-            "コーヒーメーカー 全自動", "エスプレッソマシン", "食洗機 工事不要", "浄水器 カートリッジ",
-            "ブレンダー", "フードプロセッサー", "ホットプレート", "トースター 高級",
-            "フライパン IH", "鍋 セット", "包丁 三徳", "まな板 抗菌", "保存容器 耐熱",
-            "真空保存容器", "キッチンスケール",
-        ],
-        "exclude_keywords": ["中古", "ジャンク"],
-        "target_count": 500,
-        "description_policy": "時短・家事効率化・比較記事に向いたキッチン商品を優先する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-    {
-        "label": "ペット用品・自動化",
-        "group": "pet_supplies",
-        "genre_id": "",
-        "keywords": [
-            "ペットシーツ まとめ買い", "猫砂 まとめ買い", "ドッグフード 大容量", "キャットフード 大容量",
-            "自動給餌器", "ペットカメラ", "自動給水器 ペット", "猫 自動トイレ",
-            "犬 ハーネス", "猫 爪とぎ", "ペット 消臭", "ペット ブラシ",
-            "ペット キャリー", "犬 おやつ", "猫 おやつ", "ペット トイレ",
-            "ペット ドライヤー", "ペット バリカン", "ペット 暑さ対策", "ペット 見守り",
-        ],
-        "exclude_keywords": ["中古", "ジャンク"],
-        "target_count": 500,
-        "description_policy": "定期購入・自動化・見守り需要があるペット用品を優先する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-    {
-        "label": "アウトドア・防災用品",
-        "group": "outdoor_disaster",
-        "genre_id": "",
-        "keywords": [
-            "ポータブル電源", "ソーラーパネル ポータブル電源", "防災セット", "非常食 セット",
-            "保存水", "キャンプ テント", "キャンプ チェア", "アウトドア テーブル",
-            "寝袋", "クーラーボックス", "LED ランタン", "焚き火台", "タープ",
-            "アウトドア ワゴン", "防災 ラジオ", "簡易トイレ 防災", "モバイルバッテリー 大容量",
-            "空調服", "冷感 ベスト", "熱中症対策 グッズ",
-        ],
-        "exclude_keywords": ["中古", "ジャンク", "ふるさと納税"],
-        "target_count": 500,
-        "description_policy": "季節需要・防災需要・高単価商品を優先する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-    {
-        "label": "日用品・消耗品まとめ買い",
-        "group": "daily_consumables",
-        "genre_id": "",
-        "keywords": [
-            "洗濯洗剤 詰め替え 大容量", "柔軟剤 詰め替え 大容量", "食器用洗剤 詰め替え 大容量",
-            "キッチンペーパー まとめ買い", "トイレットペーパー まとめ買い", "ティッシュペーパー まとめ買い",
-            "除菌シート まとめ買い", "マスク まとめ買い", "歯ブラシ まとめ買い", "歯磨き粉 まとめ買い",
-            "ゴミ袋 45L まとめ買い", "紙おむつ まとめ買い", "ペットボトル 水 まとめ買い",
-            "炭酸水 まとめ買い", "コーヒー ドリップ まとめ買い", "レトルト食品 まとめ買い",
-        ],
-        "exclude_keywords": ["中古", "ジャンク", "ふるさと納税"],
-        "target_count": 500,
-        "description_policy": "Amazon送客にもつながりやすい日用品・消耗品を優先する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-    {
-        "label": "スマートホーム・IoT",
-        "group": "smart_home_iot",
-        "genre_id": "",
-        "keywords": [
-            "スマートロック", "スマートリモコン", "スマートプラグ", "スマート電球",
-            "SwitchBot", "Nature Remo", "Alexa 対応", "Google Home 対応",
-            "ロボット掃除機", "スマートカーテン", "温湿度計 スマート", "CO2センサー",
-            "見守りセンサー", "人感センサー", "スマートスピーカー", "スマートホーム セット",
-        ],
-        "exclude_keywords": ["中古", "ジャンク"],
-        "target_count": 500,
-        "description_policy": "スマートホーム化・省力化の文脈で紹介しやすい商品を優先する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-    {
-        "label": "カー用品・車載ガジェット",
-        "group": "car_gadgets",
-        "genre_id": "",
-        "keywords": [
-            "ドライブレコーダー 前後", "ドライブレコーダー ミラー型", "車載 冷蔵庫", "ポータブルナビ",
-            "ジャンプスターター", "車載充電器 USB-C", "タイヤ 空気圧センサー", "カーナビ",
-            "ETC2.0 車載器", "車載ホルダー magsafe", "洗車 高圧洗浄機", "コーティング剤 車",
-            "レーダー探知機", "バックカメラ", "車中泊 マット", "車中泊 ポータブル電源",
-        ],
-        "exclude_keywords": ["中古", "ジャンク"],
-        "target_count": 500,
-        "description_policy": "車載ガジェット・安全・車中泊需要に向く商品を優先する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-    {
-        "label": "学習・資格・教育ガジェット",
-        "group": "learning_tools",
-        "genre_id": "",
-        "keywords": [
-            "電子辞書", "語学 学習 タブレット", "ペンタブレット", "液タブ", "デジタルノート",
-            "電子メモパッド", "英語教材", "プログラミング 学習 キット", "ロボット プログラミング",
-            "知育 タブレット", "タイピング キーボード", "オンライン授業 マイク", "Webカメラ 4K",
-            "ノイズキャンセリング ヘッドホン", "学習机 昇降", "デスクライト 目に優しい",
-        ],
-        "exclude_keywords": ["中古", "ジャンク"],
-        "target_count": 500,
-        "description_policy": "学習効率化・資格・教育DXの切り口で紹介しやすい商品を優先する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-    {
-        "label": "トレカ・ホビー高回転",
-        "group": "trading_cards_hobby",
-        "genre_id": "207659",
-        "keywords": [
-            "ポケモンカード BOX", "ポケモンカード シングル", "ポケモンカード SAR",
-            "ポケモンカード UR", "ポケモンカード リザードン", "遊戯王 シングルカード",
-            "遊戯王 BOX", "ワンピースカード BOX", "ワンピースカード シングル",
-            "デュエルマスターズ BOX", "マジックザギャザリング", "トレーディングカード 高額",
-        ],
-        "exclude_keywords": ["中古", "ジャンク", "オリパ"],
-        "target_count": 500,
-        "description_policy": "回転が早いランキング商品を優先し、相場・人気カード文脈で紹介する",
-        "reason": "expanded market-pipeline discovery task",
-    },
-]
+
+def config_paths(env_key: str, default_name: str) -> list[Path]:
+    raw = os.environ.get(env_key, "").strip()
+    if raw:
+        return [Path(item.strip()).expanduser() for item in raw.split(",") if item.strip()]
+    return [DATA_DIR / default_name, ROOT / "config" / default_name]
 
 
-DEFAULT_GOALS = [
-    {
-        "goal_name": "aixec-market-pipeline",
-        "worker_name": "aixec-market-pipeline-enqueue",
-        "description": "AIxEC market-pipeline 新規4000件/日を達成するまで継続",
-        "function_name": "aixec_market_jobs.market_pipeline_job",
-        "queue": "auto",
-        "resource": "ollama:192.168.0.14:gemma4:e4b",
-        "daily_target": 4000,
-        "per_run_target": 500,
-        "max_runs_per_day": 999,
-        "cooldown_seconds": DEFAULT_COOLDOWN_SECONDS,
-        "priority": 10,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {
-                "dry_run": False,
-                "source": "worker_auto",
-                "resource": "ollama",
-                "ollama_host": "192.168.0.14",
-                "ollama_model": "gemma4:e4b",
-                "limit": 500,
-                "hits": 20,
-                "pages": 3,
-                "max_candidates": 800,
-                "score_mode": "heuristic",
-                "skip_sns": False,
-            },
-            "meta": {
-                "project": "aixec",
-                "app": "market_pipeline",
-                "source": "worker_auto",
-                "resource": "ollama",
-                "ollama_host": "192.168.0.14",
-                "ollama_model": "gemma4:e4b",
-                "worker_name": "aixec-market-pipeline-enqueue",
-            },
-            "timeout": 3600,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-    {
-        "goal_name": "aixec-growth-agent",
-        "worker_name": "aixec-growth-agent-enqueue",
-        "description": "AIxEC growth-agent を目標達成型で実行",
-        "function_name": "aixec_market_jobs.growth_agent_job",
-        "queue": "auto",
-        "resource": "aixec-api",
-        "daily_target": 1,
-        "per_run_target": 1,
-        "max_runs_per_day": 2,
-        "cooldown_seconds": 1800,
-        "priority": 20,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {
-                "dry_run": False,
-                "source": "worker_auto",
-                "market_limit": 20,
-                "skip_claude": False,
-            },
-            "meta": {
-                "project": "aixec",
-                "app": "growth_agent",
-                "source": "worker_auto",
-                "worker_name": "aixec-growth-agent-enqueue",
-            },
-            "timeout": 1800,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-    {
-        "goal_name": "aixec-register-market-worker",
-        "worker_name": "aixec-register-market-worker-enqueue",
-        "description": "既存ジャンルの楽天ランキング巡回・未登録商品登録",
-        "function_name": "aixec_market_jobs.register_market_worker_job",
-        "queue": "auto",
-        "resource": "aixec-api",
-        "daily_target": 1,
-        "per_run_target": 0,
-        "max_runs_per_day": 1,
-        "cooldown_seconds": 1800,
-        "priority": 30,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {"dry_run": False, "source": "worker_auto"},
-            "meta": {"project": "aixec", "app": "register_market", "source": "worker_auto", "worker_name": "aixec-register-market-worker-enqueue"},
-            "timeout": 3600,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-    {
-        "goal_name": "horizon-worker",
-        "worker_name": "horizon-worker-enqueue",
-        "description": "Horizonの記事・動画・はてな/Bloggerメール投稿・AIxSNS告知を6時間ごとに1日4回実行",
-        "function_name": "horizon_jobs.worker_auto_cycle_job",
-        "queue": "auto",
-        "resource": "ollama:192.168.0.14:gemma4:e4b",
-        "daily_target": 4,
-        "per_run_target": 1,
-        "max_runs_per_day": 4,
-        "cooldown_seconds": 21600,
-        "priority": 40,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {"dry_run": False, "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b"},
-            "meta": {"project": "horizon", "app": "horizon", "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b", "worker_name": "horizon-worker-enqueue"},
-            "timeout": 3600,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-    {
-        "goal_name": "url2ai-oss",
-        "worker_name": "url2ai-oss-enqueue",
-        "description": "URL2AI OSS登録 1回3件目標",
-        "function_name": "oss_jobs.worker_auto_cycle_job",
-        "queue": "auto",
-        "resource": "ollama:192.168.0.14:gemma4:e4b",
-        "daily_target": 12,
-        "per_run_target": 3,
-        "max_runs_per_day": 4,
-        "cooldown_seconds": 900,
-        "priority": 50,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {"period": "daily", "top_n": 3, "dry_run": False, "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b"},
-            "meta": {"project": "url2ai", "app": "oss", "kind": "ollama", "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b", "worker_name": "url2ai-oss-enqueue"},
-            "timeout": 1800,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-    {
-        "goal_name": "url2ai-polymarket",
-        "worker_name": "url2ai-polymarket-enqueue",
-        "description": "URL2AI Polymarket登録",
-        "function_name": "polymarket_jobs.worker_auto_cycle_job",
-        "queue": "auto",
-        "resource": "ollama:192.168.0.14:gemma4:e4b",
-        "daily_target": 4,
-        "per_run_target": 1,
-        "max_runs_per_day": 4,
-        "cooldown_seconds": 900,
-        "priority": 60,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {"dry_run": False, "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b"},
-            "meta": {"project": "url2ai", "app": "polymarket", "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b", "worker_name": "url2ai-polymarket-enqueue"},
-            "timeout": 1800,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-    {
-        "goal_name": "url2ai-finreport",
-        "worker_name": "url2ai-finreport-enqueue",
-        "description": "URL2AI FinReport登録",
-        "function_name": "finreport_jobs.worker_auto_cycle_job",
-        "queue": "auto",
-        "resource": "ollama:192.168.0.14:gemma4:e4b",
-        "daily_target": 2,
-        "per_run_target": 1,
-        "max_runs_per_day": 2,
-        "cooldown_seconds": 1800,
-        "priority": 70,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {"dry_run": False, "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b"},
-            "meta": {"project": "url2ai", "app": "finreport", "kind": "ollama", "source": "worker_auto", "resource": "ollama", "ollama_host": "192.168.0.14", "ollama_model": "gemma4:e4b", "worker_name": "url2ai-finreport-enqueue"},
-            "timeout": 1800,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-    {
-        "goal_name": "buzblogger",
-        "worker_name": "buzblogger-enqueue",
-        "description": "buzblogger記事生成・投稿を4時間ごとに1日6回実行",
-        "function_name": "buzblogger_jobs.worker_auto_cycle_job",
-        "queue": "auto",
-        "resource": "claude",
-        "daily_target": 6,
-        "per_run_target": 1,
-        "max_runs_per_day": 6,
-        "cooldown_seconds": 14400,
-        "priority": 80,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {"dry_run": False, "source": "worker_auto"},
-            "meta": {"project": "buzblogger", "app": "buzblogger", "source": "worker_auto", "worker_name": "buzblogger-enqueue"},
-            "timeout": 900,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-    {
-        "goal_name": "kurage-video-candidate-collector",
-        "worker_name": "kurage-video-candidate-collector-enqueue",
-        "description": "Kurage Entertainment向けショート動画候補を1日100件収集する。ダウンロードはしない",
-        "function_name": "entertainment_video_jobs.collect_candidates_job",
-        "queue": "kurage-video-worker",
-        "resource": "network",
-        "daily_target": 100,
-        "per_run_target": 25,
-        "max_runs_per_day": 288,
-        "cooldown_seconds": 300,
-        "priority": 90,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {"target_count": 25, "source": "worker_auto"},
-            "meta": {"project": "kurage_web", "app": "entertainment_video", "kind": "candidate_collect", "source": "worker_auto", "worker_name": "kurage-video-candidate-collector-enqueue"},
-            "timeout": 600,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-    {
-        "goal_name": "kurage-video-downloader",
-        "worker_name": "kurage-video-downloader-enqueue",
-        "description": "収集済み候補から許可条件を満たすショート動画を1日20本ダウンロードする",
-        "function_name": "entertainment_video_jobs.download_candidates_job",
-        "queue": "kurage-video-worker",
-        "resource": "yt-dlp",
-        "daily_target": 20,
-        "per_run_target": 5,
-        "max_runs_per_day": 288,
-        "cooldown_seconds": 300,
-        "priority": 91,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {"target_count": 5, "max_attempts": 15, "sleep_seconds": 3, "source": "worker_auto"},
-            "meta": {"project": "kurage_web", "app": "entertainment_video", "kind": "download", "source": "worker_auto", "resource": "yt-dlp", "worker_name": "kurage-video-downloader-enqueue"},
-            "timeout": 5400,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-    {
-        "goal_name": "kurage-video-translate-publish",
-        "worker_name": "kurage-video-translate-publish-enqueue",
-        "description": "ダウンロード済み動画をVoice Proへ投入し、日本語は英語へ、英語は日本語へ翻訳する。公開完了も同期する",
-        "function_name": "entertainment_video_jobs.translate_downloaded_job",
-        "queue": "kurage-video-worker",
-        "resource": "voicepro",
-        "daily_target": 20,
-        "per_run_target": 2,
-        "max_runs_per_day": 288,
-        "cooldown_seconds": 300,
-        "priority": 92,
-        "enabled": 1,
-        "payload": {
-            "kwargs": {"target_count": 2, "source": "worker_auto"},
-            "meta": {"project": "kurage_web", "app": "entertainment_video", "kind": "translate_publish", "source": "worker_auto", "resource": "voicepro", "worker_name": "kurage-video-translate-publish-enqueue"},
-            "timeout": 900,
-            "result_ttl": 86400,
-            "failure_ttl": 604800,
-        },
-    },
-]
+def load_json_config(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def load_goal_config() -> dict[str, Any]:
+    for path in config_paths("KDECK_GOALS_CONFIG", "goals.local.json"):
+        if not path.is_file():
+            continue
+        data = load_json_config(path)
+        if isinstance(data, list):
+            return {"goals": data, "task_sets": {}, "path": str(path)}
+        if isinstance(data, dict):
+            goals = data.get("goals")
+            task_sets = data.get("task_sets") or {}
+            return {
+                "goals": goals if isinstance(goals, list) else [],
+                "task_sets": task_sets if isinstance(task_sets, dict) else {},
+                "path": str(path),
+            }
+    return {"goals": [], "task_sets": {}, "path": ""}
+
+
+GOAL_CONFIG = load_goal_config()
+DEFAULT_GOALS = GOAL_CONFIG["goals"]
+GOAL_TASK_SETS = GOAL_CONFIG["task_sets"]
+GOAL_CONFIG_PATH = GOAL_CONFIG["path"]
 
 
 def utc_now() -> str:
@@ -630,6 +196,8 @@ def init_db() -> None:
 
 def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = None) -> dict[str, Any]:
     now = now or utc_now()
+    if KGROWTH_IMPROVEMENT_JOBS_PATH is None:
+        return {"ok": False, "skipped": True, "error": "kgrowth improvement jobs path is not configured"}
     if not KGROWTH_IMPROVEMENT_JOBS_PATH.is_file():
         return {"ok": False, "error": "kgrowth improvement jobs not found", "path": str(KGROWTH_IMPROVEMENT_JOBS_PATH)}
     try:
@@ -837,6 +405,8 @@ def run_kgrowth_weekly(conn: sqlite3.Connection, *, force: bool = False) -> dict
             "last_run_at": last.isoformat() if last else "",
             "min_interval_seconds": KGROWTH_MIN_INTERVAL_SECONDS,
         }
+    if KGROWTH_DIR is None:
+        return {"ok": False, "skipped": True, "reason": "kgrowth directory is not configured"}
     if not KGROWTH_DIR.is_dir():
         raise RuntimeError(f"kgrowth directory not found: {KGROWTH_DIR}")
     started = utc_now()
@@ -994,6 +564,8 @@ def rq_post(path: str, payload: dict[str, Any], timeout: int = 20) -> dict[str, 
 
 
 def worker_status() -> dict[str, Any]:
+    if not WORKER_STATUS_URL:
+        return {"ok": False, "skipped": True, "error": "worker status URL is not configured"}
     url = urllib.parse.urlparse(WORKER_STATUS_URL)
     base = f"{url.scheme}://{url.netloc}"
     path = url.path + (("?" + url.query) if url.query else "")
@@ -1294,25 +866,22 @@ def job_error_note(job: dict[str, Any]) -> str:
 
 
 def job_items(job: dict[str, Any], result: dict[str, Any], goal: dict[str, Any] | None = None) -> int:
-    if goal and goal.get("goal_name") == "aixec-market-pipeline":
-        # market-pipeline's goal is new product creation. Registered/selected
-        # includes updates, so counting it makes "new 500" look complete when
-        # nothing new was created.
-        sources = (
-            result.get("metrics") if isinstance(result.get("metrics"), dict) else {},
-            _nested_dict(result, "submit", "response", "result"),
-            result,
-        )
-        for source in sources:
-            value = _int_value(source.get("created") if isinstance(source, dict) else None)
-            if value is not None:
-                return value
-        return 0
-    for source in (result, result.get("metrics") if isinstance(result.get("metrics"), dict) else {}, job.get("lifecycle") or {}):
+    payload = goal.get("payload") if goal else {}
+    evaluation = payload.get("evaluation") if isinstance(payload, dict) else {}
+    keys = evaluation.get("item_count_keys") if isinstance(evaluation, dict) else None
+    if not isinstance(keys, list) or not keys:
+        keys = ["items", "created", "registered", "selected"]
+    sources = (
+        result.get("metrics") if isinstance(result.get("metrics"), dict) else {},
+        _nested_dict(result, "submit", "response", "result"),
+        result,
+        job.get("lifecycle") or {},
+    )
+    for source in sources:
         if not isinstance(source, dict):
             continue
-        for key in ("items", "created", "registered", "selected"):
-            value = _int_value(source.get(key))
+        for key in keys:
+            value = _int_value(source.get(str(key)))
             if value is not None:
                 return value
     return 0
@@ -1390,11 +959,16 @@ def _market_group_stats(conn: sqlite3.Connection, goal_id: int) -> dict[str, dic
     return stats
 
 
-def market_task_for_attempt(conn: sqlite3.Connection, goal_id: int, attempt: int) -> dict[str, Any]:
-    stats = _market_group_stats(conn, goal_id)
+def task_for_attempt(conn: sqlite3.Connection, goal: dict[str, Any], attempt: int) -> dict[str, Any]:
+    payload = goal.get("payload") if isinstance(goal.get("payload"), dict) else {}
+    task_set_name = str(payload.get("task_set") or goal.get("goal_name") or "")
+    tasks = GOAL_TASK_SETS.get(task_set_name)
+    if not isinstance(tasks, list) or not tasks:
+        return {}
+    stats = _market_group_stats(conn, int(goal["id"]))
     best_score = -10**9
-    selected_index = attempt % len(MARKET_TASKS)
-    for index, task in enumerate(MARKET_TASKS):
+    selected_index = attempt % len(tasks)
+    for index, task in enumerate(tasks):
         group = str(task.get("group") or "")
         entry = stats.get(group, {})
         runs = int(entry.get("runs") or 0)
@@ -1412,15 +986,15 @@ def market_task_for_attempt(conn: sqlite3.Connection, goal_id: int, attempt: int
             score -= 350
         score += min(created, 300)
         # Keep deterministic variety among equal-ish choices.
-        score -= abs((attempt % len(MARKET_TASKS)) - index) * 2
+        score -= abs((attempt % len(tasks)) - index) * 2
         if score > best_score:
             best_score = score
             selected_index = index
 
-    task = dict(MARKET_TASKS[selected_index])
+    task = dict(tasks[selected_index])
     group = str(task.get("group") or "")
     entry = stats.get(group, {})
-    task["target_count"] = 500
+    task["target_count"] = int(goal.get("per_run_target") or task.get("target_count") or 1)
     task["reason"] = (
         f"{task.get('reason', '')}; attempt={attempt + 1}; "
         f"adaptive_stats group={group} runs={int(entry.get('runs') or 0)} "
@@ -1439,10 +1013,11 @@ def enqueue_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> dict[str, An
         "SELECT COUNT(*) AS c FROM goal_runs WHERE goal_id = ? AND day = ?",
         (goal["id"], today),
     ).fetchone()["c"]
-    if goal["goal_name"] == "aixec-market-pipeline":
-        kwargs["task"] = market_task_for_attempt(conn, int(goal["id"]), int(run_count or 0))
-        kwargs["target_count"] = int(goal.get("per_run_target") or 500)
-        kwargs["limit"] = int(goal.get("per_run_target") or 500)
+    task = task_for_attempt(conn, goal, int(run_count or 0))
+    if task:
+        kwargs["task"] = task
+        kwargs["target_count"] = int(goal.get("per_run_target") or task.get("target_count") or 1)
+        kwargs["limit"] = int(goal.get("per_run_target") or task.get("target_count") or 1)
     request = {
         "queue": goal.get("queue") or "auto",
         "function": goal["function_name"],

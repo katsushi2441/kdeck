@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -11,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from app import controller
-KGROWTH_PLAN = Path("/home/kojima/work/kgrowth/reports/growth_plan_latest.md")
-KGROWTH_JOBS = Path("/home/kojima/work/kgrowth/data/improvement_jobs_latest.json")
+KGROWTH_PLAN = Path(os.environ.get("KDECK_KGROWTH_PLAN", "")).expanduser() if os.environ.get("KDECK_KGROWTH_PLAN") else None
+KGROWTH_JOBS = controller.KGROWTH_IMPROVEMENT_JOBS_PATH
 
 
 def compact_goal(goal: dict) -> dict:
@@ -38,7 +39,7 @@ def compact_event(event: dict) -> dict:
 
 
 def latest_kgrowth_jobs(limit: int = 5) -> list[dict]:
-    if not KGROWTH_JOBS.is_file():
+    if KGROWTH_JOBS is None or not KGROWTH_JOBS.is_file():
         return []
     try:
         payload = json.loads(KGROWTH_JOBS.read_text(encoding="utf-8"))
@@ -61,7 +62,7 @@ def latest_kgrowth_jobs(limit: int = 5) -> list[dict]:
 
 
 def plan_excerpt(limit: int = 800) -> str:
-    if not KGROWTH_PLAN.is_file():
+    if KGROWTH_PLAN is None or not KGROWTH_PLAN.is_file():
         return ""
     text = KGROWTH_PLAN.read_text(encoding="utf-8", errors="replace")
     return text[:limit]

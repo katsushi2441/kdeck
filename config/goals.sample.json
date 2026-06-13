@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "goals": [
+    {
+      "goal_name": "example-daily-job",
+      "worker_name": "example-daily-job-enqueue",
+      "description": "Run an application job until the daily target is met.",
+      "function_name": "example_jobs.run",
+      "queue": "auto",
+      "resource": "default",
+      "daily_target": 10,
+      "per_run_target": 1,
+      "max_runs_per_day": 10,
+      "cooldown_seconds": 900,
+      "priority": 100,
+      "enabled": 1,
+      "payload": {
+        "kwargs": {"source": "worker_auto"},
+        "meta": {"source": "worker_auto", "worker_name": "example-daily-job-enqueue"},
+        "evaluation": {"item_count_keys": ["items", "created"]},
+        "timeout": 1800,
+        "result_ttl": 86400,
+        "failure_ttl": 604800
+      }
+    }
+  ],
+  "task_sets": {
+    "example-daily-job": [
+      {"group": "default", "target_count": 1, "reason": "sample task"}
+    ]
+  }
+}

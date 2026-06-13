@@ -27,18 +27,42 @@ from pydantic import BaseModel, Field
 
 from app import controller
 
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env")
 
-APP_NAME = "Kurage Agent Deck"
+DATA_DIR = Path(os.environ.get("KDECK_DATA_DIR", ROOT / "storage")).expanduser()
+
+def config_paths(env_key: str, default_name: str) -> list[Path]:
+    raw = os.environ.get(env_key, "").strip()
+    if raw:
+        return [Path(item.strip()).expanduser() for item in raw.split(",") if item.strip()]
+    return [DATA_DIR / default_name, ROOT / "config" / default_name]
+
+def load_app_config() -> dict[str, Any]:
+    for path in config_paths("KDECK_APP_CONFIG", "app.local.json"):
+        if not path.is_file():
+            continue
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict):
+            data["_path"] = str(path)
+            return data
+    return {"_path": ""}
+
+APP_CONFIG = load_app_config()
+APP_NAME = os.environ.get("KDECK_APP_NAME", str(APP_CONFIG.get("app_name") or "kdeck"))
 SESSION_PREFIX = "kdeck-"
 TOKEN = os.environ.get("KDECK_TOKEN", "")
 CODEX_CMD = os.environ.get("KDECK_CODEX_CMD", "codex")
 CODEX_MODEL = os.environ.get("KDECK_CODEX_MODEL", "gpt-5.5")
 CODEX_SANDBOX = os.environ.get("KDECK_CODEX_SANDBOX", "workspace-write")
 SWARMCLAW_BASE_URL = os.environ.get("SWARMCLAW_BASE_URL", "http://127.0.0.1:3456").rstrip("/")
-SWARMCLAW_HOME = os.environ.get("SWARMCLAW_HOME", "/home/kojima/.swarmclaw")
-OPENCLAW_CMD = os.environ.get("KDECK_OPENCLAW_CMD", "/home/kojima/.nvm/versions/node/v24.16.0/bin/openclaw")
-REMOTE_SSH_KEY = os.environ.get("KDECK_REMOTE_SSH_KEY", "/home/kojima/.ssh/id_swarmclaw_openclaw")
+SWARMCLAW_HOME = os.environ.get("SWARMCLAW_HOME", str(Path.home() / ".swarmclaw"))
+OPENCLAW_CMD = os.environ.get("KDECK_OPENCLAW_CMD", "openclaw")
+REMOTE_SSH_KEY = os.environ.get("KDECK_REMOTE_SSH_KEY", str(Path.home() / ".ssh" / "id_swarmclaw_openclaw"))
 REMOTE_SSH_USER = os.environ.get("KDECK_REMOTE_SSH_USER", "kojima")
 REMOTE_SSH_PORT = int(os.environ.get("KDECK_REMOTE_SSH_PORT", "2222"))
 REMOTE_CODEX_CANDIDATES = [
@@ -90,33 +114,20 @@ CODEX_EXECUTION_MODES = {
 DEFAULT_EXECUTION_MODE = os.environ.get("KDECK_DEFAULT_EXECUTION_MODE", "chat-only").strip() or "chat-only"
 if DEFAULT_EXECUTION_MODE not in CODEX_EXECUTION_MODES:
     DEFAULT_EXECUTION_MODE = "chat-only"
-DATA_DIR = Path(os.environ.get("KDECK_DATA_DIR", Path(__file__).resolve().parents[1] / "storage")).expanduser()
 CHAT_DIR = DATA_DIR / "chat_threads"
 TASK_DIR = DATA_DIR / "agent_tasks"
 MEMORY_DIR = DATA_DIR / "shared_memory"
 CHAT_SAVE_MESSAGE_LIMIT = 120
 CHAT_PROMPT_MESSAGE_LIMIT = 80
 CHAT_PROMPT_CHAR_LIMIT = 60000
-REMOTE_PROJECT_NAMES = [
-    "url2ai",
-    "vwork",
-    "aixec",
-    "horizon",
-    "buzblogger",
-    "rqdb4ai",
-    "kdeck",
-    "kmail",
-    "kurage",
-    "swork",
-    "airadio-scripted-mv",
-    "bittensorman.xyz",
-]
-DEFAULT_ALLOWED_ROOTS = ",".join(f"/home/kojima/work/{name}" for name in REMOTE_PROJECT_NAMES)
-ALLOWED_ROOTS = [
-    Path(p).expanduser().resolve()
-    for p in os.environ.get("KDECK_ALLOWED_ROOTS", DEFAULT_ALLOWED_ROOTS).split(",")
-    if p.strip()
-]
+REMOTE_PROJECT_NAMES = [str(name).strip() for name in APP_CONFIG.get("project_names", []) if str(name).strip()]
+_default_roots = APP_CONFIG.get("allowed_roots") if isinstance(APP_CONFIG.get("allowed_roots"), list) else []
+_allowed_roots_raw = os.environ.get("KDECK_ALLOWED_ROOTS", ",".join(str(p) for p in _default_roots)).strip()
+ALLOWED_ROOTS = [Path(p).expanduser().resolve() for p in _allowed_roots_raw.split(",") if p.strip()]
+if not ALLOWED_ROOTS:
+    ALLOWED_ROOTS = [ROOT.resolve()]
+DEFAULT_CWD = os.environ.get("KDECK_DEFAULT_CWD", str(APP_CONFIG.get("default_cwd") or ALLOWED_ROOTS[0]))
+DEFAULT_LOCAL_CWD = os.environ.get("KDECK_DEFAULT_LOCAL_CWD", str(APP_CONFIG.get("default_local_cwd") or ROOT))
 
 
 def project_folders_under(base: str, names: list[str] | None = None) -> list[str]:
@@ -128,7 +139,7 @@ app = FastAPI(title=APP_NAME)
 
 class CreateSessionRequest(BaseModel):
     name: str = Field(default="codex", max_length=40)
-    cwd: str = "/home/kojima/work/url2ai"
+    cwd: str = DEFAULT_CWD
     command: str = ""
 
 
@@ -139,8 +150,8 @@ class SendRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=12000)
-    cwd: str = "/home/kojima/work/url2ai"
-    local_cwd: str = "/home/kojima/work/kdeck"
+    cwd: str = DEFAULT_CWD
+    local_cwd: str = DEFAULT_LOCAL_CWD
     thread_id: str = ""
     model: str = ""
     remote_llm_backend: str = ""
@@ -257,94 +268,32 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
     {
         "id": "local",
         "label": "local",
-        "role": "kdeck local Codex",
-        "host": "192.168.0.3",
+        "role": "local Codex",
+        "host": "localhost",
         "kind": "local",
         "gateway_id": "",
-        "allowed_roots": [],
-        "folder_base": "/home/kojima/work",
-        "project_folders": [],
+        "allowed_roots": [str(path) for path in ALLOWED_ROOTS],
+        "folder_base": str(ROOT),
+        "project_folders": [str(path) for path in ALLOWED_ROOTS],
         "llm_backends": ["codex-cli"],
         "default_llm_backend": "codex-cli",
         "default_model": CODEX_MODEL,
         "backend_default_models": {"codex-cli": CODEX_MODEL},
-    },
-    {
-        "id": "hermes-192-168-0-2",
-        "label": "Hermes scheduler",
-        "role": "Hermesジョブ、enqueue、スケジュール確認",
-        "host": "192.168.0.2",
-        "kind": "swarmclaw",
-        "gateway_id": "openclaw-192-168-0-2",
-        "folder_base": "/home/kojima/exdirect",
-        "project_folders": project_folders_under("/home/kojima/exdirect"),
-        "llm_backends": ["codex-cli", "claude-cli"],
-        "default_llm_backend": "codex-cli",
-        "default_model": CODEX_MODEL,
-        "backend_default_models": {
-            "codex-cli": CODEX_MODEL,
-            "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "claude-sonnet-4-6"),
-        },
-    },
-    {
-        "id": "aixec-api-192-168-0-14",
-        "label": "AIxEC API server",
-        "role": "AIxEC API、登録API、dashboard report確認",
-        "host": "192.168.0.14",
-        "kind": "swarmclaw",
-        "gateway_id": "openclaw-192-168-0-14",
-        "folder_base": "/home/kojima/bittensorman/aidexx",
-        "project_folders": project_folders_under("/home/kojima/bittensorman/aidexx", [
-            "aixec",
-            "url2ai",
-            "horizon",
-            "buzblogger",
-            "vwork",
-            "kurage",
-            "kdeck",
-        ]),
-        "llm_backends": ["codex-cli", "claude-cli", "ollama"],
-        "default_llm_backend": "codex-cli",
-        "default_model": CODEX_MODEL,
-        "backend_default_models": REMOTE_BACKEND_DEFAULT_MODELS,
-    },
-    {
-        "id": "hyperframes-192-168-0-11",
-        "label": "Hyperframes video",
-        "role": "Hyperframes、Kurage Horizon動画生成、YouTube投稿確認",
-        "host": "192.168.0.11",
-        "kind": "swarmclaw",
-        "gateway_id": "openclaw-192-168-0-11",
-        "folder_base": "/home/kojima/exdirect",
-        "project_folders": project_folders_under("/home/kojima/exdirect", [
-            "hyperframes",
-            "remotion",
-            "horizon",
-            "airadio-scripted-mv",
-            "kurage",
-            "vwork",
-            "aixec",
-            "url2ai",
-        ]),
-        "llm_backends": ["codex-cli", "claude-cli"],
-        "default_llm_backend": "codex-cli",
-        "default_model": CODEX_MODEL,
-        "backend_default_models": {
-            "codex-cli": CODEX_MODEL,
-            "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "claude-sonnet-4-6"),
-        },
     },
 ]
 
 
 def load_agents() -> list[dict[str, Any]]:
     raw = os.environ.get("KDECK_AGENTS_JSON", "").strip()
-    if not raw:
-        return DEFAULT_AGENTS
-    try:
-        loaded = json.loads(raw)
-    except json.JSONDecodeError:
-        return DEFAULT_AGENTS
+    if raw:
+        try:
+            loaded = json.loads(raw)
+        except json.JSONDecodeError:
+            return DEFAULT_AGENTS
+    else:
+        loaded = APP_CONFIG.get("agents", [])
+        if not loaded:
+            return DEFAULT_AGENTS
     if not isinstance(loaded, list):
         return DEFAULT_AGENTS
     agents: list[dict[str, Any]] = []
@@ -374,7 +323,7 @@ def load_agents() -> list[dict[str, Any]]:
             ] if isinstance(item.get("llm_backends"), list) else ["codex-cli", "claude-cli", "ollama"],
             "default_llm_backend": str(item.get("default_llm_backend") or "codex-cli"),
             "default_model": str(item.get("default_model") or CODEX_MODEL),
-            "backend_default_models": item.get("backend_default_models") if isinstance(item.get("backend_default_models"), dict) else REMOTE_BACKEND_DEFAULT_MODELS,
+            "backend_default_models": item.get("backend_default_models") if isinstance(item.get("backend_default_models"), dict) else {**REMOTE_BACKEND_DEFAULT_MODELS, "codex-cli": CODEX_MODEL},
             "allowed_roots": [
                 str(p).strip()
                 for p in item.get("allowed_roots", [])
@@ -805,6 +754,9 @@ def healthz() -> dict[str, Any]:
 def config() -> dict[str, Any]:
     return {
         "ok": True,
+        "app_name": APP_NAME,
+        "app_config_path": str(APP_CONFIG.get("_path") or ""),
+        "goal_config_path": controller.GOAL_CONFIG_PATH,
         "allowed_roots": [str(p) for p in ALLOWED_ROOTS],
         "codex_cmd": CODEX_CMD,
         "codex_model": CODEX_MODEL,
@@ -1099,7 +1051,7 @@ def run_remote_openclaw_agent(agent: dict[str, Any], cwd: str, backend: str, mod
     ws_url = gateway_ws_url(agent)
     session_suffix = re.sub(r"[^a-zA-Z0-9_-]+", "-", f"kdeck-{thread_id}-{job_id}")[:120]
     remote_prompt = (
-        "Kurage Agent Deckからの委任タスクです。\n"
+        f"{APP_NAME}からの委任タスクです。\n"
         f"対象サーバ: {agent.get('host') or ''}\n"
         f"対象ロール: {agent.get('role') or ''}\n"
         f"選択されたリモート作業フォルダ: {cwd}\n"
@@ -1379,7 +1331,7 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         f"Agent host: {agent.get('host') or 'local'}\n\n"
     )
     prompt = (
-        "You are Codex in Kurage Agent Deck. Answer in Japanese unless the user asks otherwise.\n"
+        f"You are Codex in {APP_NAME}. Answer in Japanese unless the user asks otherwise.\n"
         "Continue the conversation below and act on the selected workspace when needed.\n"
         "The conversation block is persisted chat history from this deck. Use it as context when answering.\n\n"
         + execution_mode_instruction(execution_mode)

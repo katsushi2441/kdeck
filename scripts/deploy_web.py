@@ -9,12 +9,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-REMOTE_DIRS = ["web", "kurage_exbridge_jp"]
-UPLOADS = [
-    (ROOT / "web" / "kdeck.php", "kdeck.php"),
-    (ROOT / "images" / "kdeck.png", "images/kdeck.png"),
-    (ROOT / "images" / "kurage-icon.png", "images/kurage-icon.png"),
-]
+REMOTE_DIRS = [part for part in os.environ.get("KDECK_FTP_REMOTE_DIR", "").split("/") if part]
+UPLOADS = [(ROOT / "web" / "kdeck.php", "kdeck.php")]
 
 
 def load_env(path: Path) -> None:
@@ -48,9 +44,9 @@ def load_legacy_ftp_helper(path: Path) -> None:
 
 
 def connect() -> FTP:
-    host = os.environ.get("HETEML_FTP_HOST", "ftp-exbridge.heteml.net")
-    user = os.environ.get("HETEML_FTP_USER", "exbridge")
-    password = os.environ["HETEML_FTP_PASS"]
+    host = os.environ["KDECK_FTP_HOST"]
+    user = os.environ["KDECK_FTP_USER"]
+    password = os.environ["KDECK_FTP_PASS"]
     ftp = FTP()
     ftp.encoding = "utf-8"
     ftp.connect(host, 21, timeout=30)
@@ -80,7 +76,7 @@ def upload_file(ftp: FTP, local: Path, remote: str) -> None:
 
 def upload_config(ftp: FTP) -> None:
     token = os.environ.get("KDECK_TOKEN", "")
-    api_base = os.environ.get("KDECK_API_BASE", "http://exbridge.ddns.net:18301")
+    api_base = os.environ.get("KDECK_API_BASE", "http://127.0.0.1:18301")
     if not token or token == "change-this-token":
         raise SystemExit("KDECK_TOKEN is not configured")
     body = (
@@ -99,7 +95,8 @@ def main() -> None:
     load_env(Path.home() / ".env")
     load_env(Path.home() / ".hermes" / ".env")
     load_env(ROOT / ".env")
-    load_legacy_ftp_helper(Path.home() / "work" / "url2ai" / "src" / "ftpphp.py")
+    if not REMOTE_DIRS:
+        raise SystemExit("KDECK_FTP_REMOTE_DIR is required")
     ftp = connect()
     try:
         ensure_cwd(ftp, REMOTE_DIRS)

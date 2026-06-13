@@ -1,0 +1,22 @@
+{
+  "app_name": "kdeck",
+  "allowed_roots": ["/path/to/project"],
+  "default_cwd": "/path/to/project",
+  "default_local_cwd": "/path/to/kdeck",
+  "project_names": ["project"],
+  "agents": [
+    {
+      "id": "local",
+      "label": "local",
+      "role": "local Codex",
+      "host": "localhost",
+      "kind": "local",
+      "gateway_id": "",
+      "allowed_roots": ["/path/to/project"],
+      "folder_base": "/path/to",
+      "project_folders": ["/path/to/project"],
+      "llm_backends": ["codex-cli"],
+      "default_llm_backend": "codex-cli"
+    }
+  ]
+}

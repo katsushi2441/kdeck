@@ -1,5 +1,7 @@
 <?php
-require_once __DIR__ . '/auth_common.php';
+if (is_readable(__DIR__ . '/auth_common.php')) {
+    require_once __DIR__ . '/auth_common.php';
+}
 date_default_timezone_set('Asia/Tokyo');
 
 function kdeck_load_env_file($path) {
@@ -57,15 +59,26 @@ kdeck_load_env_file(__DIR__ . '/kdeck.env');
 kdeck_load_env_file(__DIR__ . '/.env');
 kdeck_load_env_file(__DIR__ . '/../.env');
 
-$KDECK_API_BASE = kdeck_env('KDECK_API_BASE', 'http://exbridge.ddns.net:18301');
+$KDECK_API_BASE = kdeck_env('KDECK_API_BASE', 'http://127.0.0.1:18301');
 $KDECK_TOKEN = kdeck_env('KDECK_TOKEN', 'change-this-token');
-$KDECK_RETURN_URL = 'https://kurage.exbridge.jp/kdeck.php';
-$auth = url2ai_auth_bootstrap();
+$KDECK_UI_TITLE = kdeck_env('KDECK_UI_TITLE', 'kdeck');
+$KDECK_UI_SUBTITLE = kdeck_env('KDECK_UI_SUBTITLE', 'Codex CLI web console');
+$KDECK_UI_DESCRIPTION = kdeck_env('KDECK_UI_DESCRIPTION', 'Mobile web console for Codex CLI sessions.');
+$KDECK_UI_ICON = kdeck_env('KDECK_UI_ICON', '');
+$KDECK_OG_IMAGE = kdeck_env('KDECK_OG_IMAGE', '');
+$KDECK_RETURN_URL = kdeck_env('KDECK_RETURN_URL', '');
+if ($KDECK_RETURN_URL === '') {
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $uri = strtok($_SERVER['REQUEST_URI'] ?? '/kdeck.php', '?');
+    $KDECK_RETURN_URL = $scheme . '://' . $host . $uri;
+}
+$auth = function_exists('url2ai_auth_bootstrap') ? url2ai_auth_bootstrap() : ['logged_in' => true, 'session_user' => 'local', 'is_admin' => true];
 $logged_in = !empty($auth['logged_in']);
 $session_user = isset($auth['session_user']) ? $auth['session_user'] : '';
 $is_admin = !empty($auth['is_admin']);
-$login_url = url2ai_auth_login_url($KDECK_RETURN_URL);
-$logout_url = url2ai_auth_logout_url($KDECK_RETURN_URL);
+$login_url = function_exists('url2ai_auth_login_url') ? url2ai_auth_login_url($KDECK_RETURN_URL) : '#';
+$logout_url = function_exists('url2ai_auth_logout_url') ? url2ai_auth_logout_url($KDECK_RETURN_URL) : '#';
 
 function kdeck_api($method, $path, $payload = null) {
     global $KDECK_API_BASE, $KDECK_TOKEN;
@@ -89,18 +102,18 @@ function kdeck_api($method, $path, $payload = null) {
 function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); }
 
 function render_login($login_url, $message = '') {
-?><!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kurage Agent Deck Login</title>
-<meta name="description" content="Kurage Agent Deck is a mobile web console for Codex CLI sessions.">
-<meta property="og:title" content="Kurage Agent Deck">
-<meta property="og:description" content="スマホからCodex CLIを操作するKurageのAIエージェントデッキ">
-<meta property="og:image" content="https://kurage.exbridge.jp/images/kdeck.png">
+?><!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($GLOBALS['KDECK_UI_TITLE'])?> Login</title>
+<meta name="description" content="<?=h($GLOBALS['KDECK_UI_DESCRIPTION'])?>">
+<meta property="og:title" content="<?=h($GLOBALS['KDECK_UI_TITLE'])?>">
+<meta property="og:description" content="<?=h($GLOBALS['KDECK_UI_DESCRIPTION'])?>">
+<?php if ($GLOBALS['KDECK_OG_IMAGE'] !== ''): ?><meta property="og:image" content="<?=h($GLOBALS['KDECK_OG_IMAGE'])?>"><?php endif; ?>
 <meta property="og:image:width" content="1536">
 <meta property="og:image:height" content="1024">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://kurage.exbridge.jp/images/kdeck.png">
+<?php if ($GLOBALS['KDECK_OG_IMAGE'] !== ''): ?><meta name="twitter:image" content="<?=h($GLOBALS['KDECK_OG_IMAGE'])?>"><?php endif; ?>
 <style>
 body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f7f9;color:#18252d;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif}.box{width:min(420px,calc(100vw - 28px));background:#fff;border:1px solid #d8e2e8;border-radius:8px;padding:18px;box-sizing:border-box}.login-brand{display:flex;align-items:center;gap:10px;margin-bottom:10px}.login-brand img{width:44px;height:44px;border-radius:50%;object-fit:cover;box-shadow:0 2px 8px rgba(0,127,150,.18)}h1{font-size:22px;margin:0}.lead{margin:0 0 16px;color:#64727c;font-size:14px;line-height:1.6}.btn{display:block;width:100%;box-sizing:border-box;border-radius:6px;background:#0b75a5;color:#fff;text-decoration:none;text-align:center;font-weight:800;padding:11px 12px}.error{margin:0 0 12px;padding:9px;border:1px solid #e0a0a0;background:#fff1f1;border-radius:6px;color:#8d2525}.muted{margin-top:12px;color:#64727c;font-size:12px}
-</style></head><body><main class="box"><div class="login-brand"><img src="/images/kurage-icon.png" alt="Kurage"><h1>Kurage Agent Deck</h1></div><?php if ($message): ?><p class="error"><?=h($message)?></p><?php endif; ?><p class="lead">kurage.exbridge.jp の共通Xログインで利用します。</p><a class="btn" href="<?=h($login_url)?>">Xでログイン</a><div class="muted">kdeck.php</div></main></body></html><?php
+</style></head><body><main class="box"><div class="login-brand"><?php if ($GLOBALS['KDECK_UI_ICON'] !== ''): ?><img src="<?=h($GLOBALS['KDECK_UI_ICON'])?>" alt=""><?php endif; ?><h1><?=h($GLOBALS['KDECK_UI_TITLE'])?></h1></div><?php if ($message): ?><p class="error"><?=h($message)?></p><?php endif; ?><p class="lead">認証して利用します。</p><a class="btn" href="<?=h($login_url)?>">Xでログイン</a><div class="muted">kdeck.php</div></main></body></html><?php
 }
 
 if (!$logged_in) {
@@ -166,20 +179,7 @@ if (isset($_GET['api']) && $_GET['api'] === 'controller_goal') {
 }
 
 $config = kdeck_api('GET', '/api/config');
-$default_roots = [
-    '/home/kojima/work/url2ai',
-    '/home/kojima/work/vwork',
-    '/home/kojima/work/kmail',
-    '/home/kojima/work/rqdb4ai',
-    '/home/kojima/work/aixec',
-    '/home/kojima/work/horizon',
-    '/home/kojima/work/buzblogger',
-    '/home/kojima/work/swork',
-    '/home/kojima/work/kdeck',
-    '/home/kojima/work/kurage',
-    '/home/kojima/work/airadio-scripted-mv',
-    '/home/kojima/work/bittensorman.xyz',
-];
+$default_roots = [getcwd() ?: __DIR__];
 $roots = !empty($config['allowed_roots']) && is_array($config['allowed_roots'])
     ? $config['allowed_roots']
     : $default_roots;
@@ -196,23 +196,20 @@ $default_execution_mode = $config['default_execution_mode'] ?? 'chat-only';
 $agents = !empty($config['agents']) && is_array($config['agents'])
     ? $config['agents']
     : [
-        ['id' => 'local', 'label' => 'local', 'role' => 'kdeck local Codex', 'host' => '192.168.0.3', 'configured' => true],
-        ['id' => 'hermes-192-168-0-2', 'label' => 'Hermes scheduler', 'role' => 'Hermesジョブ、enqueue、スケジュール確認', 'host' => '192.168.0.2', 'configured' => false],
-        ['id' => 'aixec-api-192-168-0-14', 'label' => 'AIxEC API server', 'role' => 'AIxEC API、登録API、dashboard report確認', 'host' => '192.168.0.14', 'configured' => false],
-        ['id' => 'hyperframes-192-168-0-11', 'label' => 'Hyperframes video', 'role' => 'Hyperframes、Kurage Horizon動画生成、YouTube投稿確認', 'host' => '192.168.0.11', 'configured' => false],
+        ['id' => 'local', 'label' => 'local', 'role' => 'local Codex', 'host' => 'localhost', 'configured' => true],
     ];
-?><!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kurage Agent Deck</title>
-<meta name="description" content="Kurage Agent Deck is a mobile web console for Codex CLI sessions.">
-<meta property="og:title" content="Kurage Agent Deck">
-<meta property="og:description" content="スマホからCodex CLIを操作するKurageのAIエージェントデッキ">
-<meta property="og:image" content="https://kurage.exbridge.jp/images/kdeck.png">
+?><!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title><?=h($KDECK_UI_TITLE)?></title>
+<meta name="description" content="<?=h($KDECK_UI_DESCRIPTION)?>">
+<meta property="og:title" content="<?=h($KDECK_UI_TITLE)?>">
+<meta property="og:description" content="<?=h($KDECK_UI_DESCRIPTION)?>">
+<?php if ($KDECK_OG_IMAGE !== ''): ?><meta property="og:image" content="<?=h($KDECK_OG_IMAGE)?>"><?php endif; ?>
 <meta property="og:image:width" content="1536">
 <meta property="og:image:height" content="1024">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://kurage.exbridge.jp/images/kdeck.png">
+<?php if ($GLOBALS['KDECK_OG_IMAGE'] !== ''): ?><meta name="twitter:image" content="<?=h($GLOBALS['KDECK_OG_IMAGE'])?>"><?php endif; ?>
 <style>
 	:root{--bg:#eef4f6;--panel:#ffffff;--line:#d5e1e6;--text:#17242c;--muted:#60717b;--brand:#087d9a;--brand2:#0f9b8e;--soft:#e9f5f6;--danger:#b03a2e}
-</style></head><body><header><div class="bar"><div class="brand"><img class="brand-icon" src="/images/kurage-icon.png" alt="Kurage"><span class="brand-title"><b>Kurage Agent Deck</b><span>Codex CLI web console</span></span></div><div class="muted account">@<?=h($session_user)?> · <a class="logout" href="<?=h($logout_url)?>">Logout</a></div></div></header>
+</style></head><body><header><div class="bar"><div class="brand"><?php if ($KDECK_UI_ICON !== ''): ?><img class="brand-icon" src="<?=h($KDECK_UI_ICON)?>" alt=""><?php endif; ?><span class="brand-title"><b><?=h($KDECK_UI_TITLE)?></b><span><?=h($KDECK_UI_SUBTITLE)?></span></span></div><div class="muted account">@<?=h($session_user)?> · <a class="logout" href="<?=h($logout_url)?>">Logout</a></div></div></header>
 <div class="wrap"><aside class="panel side"><div class="side-top"><h2>Chat</h2>
 <div class="row"><label class="muted">Agent</label><select id="target-agent"><?php foreach ($agents as $agent): ?><option value="<?=h($agent['id'] ?? '')?>" data-role="<?=h($agent['role'] ?? '')?>" data-host="<?=h($agent['host'] ?? '')?>" data-configured="<?=!empty($agent['configured']) ? '1' : '0'?>"><?=h(($agent['label'] ?? $agent['id'] ?? 'agent') . ' / ' . ($agent['host'] ?? ''))?></option><?php endforeach; ?></select><span id="agent-role" class="muted"></span></div>
 <div class="row"><label class="muted">Local Folder</label><select id="local-cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div>
