@@ -877,14 +877,18 @@ def job_items(job: dict[str, Any], result: dict[str, Any], goal: dict[str, Any] 
         result,
         job.get("lifecycle") or {},
     )
+    candidates: list[int] = []
     for source in sources:
         if not isinstance(source, dict):
             continue
         for key in keys:
             value = _int_value(source.get(str(key)))
             if value is not None:
-                return value
-    return 0
+                candidates.append(value)
+    # Some jobs expose diagnostic metrics such as {"created": 0} alongside
+    # the business count {"items": 20}. Prefer the strongest declared count
+    # instead of letting an early zero mask the actual progress.
+    return max(candidates) if candidates else 0
 
 
 def evaluate_job(job: dict[str, Any], goal: dict[str, Any]) -> dict[str, Any]:
@@ -1104,7 +1108,10 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
         status = "cooldown"
         cooldown_until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=max(600, int(goal.get("cooldown_seconds") or DEFAULT_COOLDOWN_SECONDS)))).isoformat()
         reason = str(evaluation.get("note") or "").strip()
-        note = f"under target or failed: +{evaluation['items']} items, retry after cooldown"
+        if int(evaluation.get("items") or 0) > 0:
+            note = f"partial progress: +{evaluation['items']} items, retry after cooldown"
+        else:
+            note = f"under target or failed: +{evaluation['items']} items, retry after cooldown"
         if reason:
             note += f" / {reason}"
     conn.execute(
