@@ -114,6 +114,7 @@ CODEX_EXECUTION_MODES = {
 DEFAULT_EXECUTION_MODE = os.environ.get("KDECK_DEFAULT_EXECUTION_MODE", "chat-only").strip() or "chat-only"
 if DEFAULT_EXECUTION_MODE not in CODEX_EXECUTION_MODES:
     DEFAULT_EXECUTION_MODE = "chat-only"
+CODEX_EXEC_TIMEOUT = int(os.environ.get("KDECK_CODEX_EXEC_TIMEOUT", "3600"))
 CHAT_DIR = DATA_DIR / "chat_threads"
 TASK_DIR = DATA_DIR / "agent_tasks"
 MEMORY_DIR = DATA_DIR / "shared_memory"
@@ -612,7 +613,12 @@ def execution_mode_instruction(execution_mode: str) -> str:
         return (
             "Execution mode: full-access.\n"
             "Before taking any action, start your response with a short acknowledgement in Japanese such as "
-            "'了解しました。これから実行します。' Then proceed with the requested work.\n\n"
+            "'了解しました。これから実行します。' Then proceed with the requested work. "
+            "When the request spans multiple repositories under /home/kojima/work, move between the required "
+            "repositories and complete the full business workflow, not only the first local edit. "
+            "For publishing/video requests, do not report success until the public article URL, public video URL, "
+            "and related commits/pushes have been verified. If any required artifact is missing, report the task "
+            "as incomplete at the top of the answer.\n\n"
         )
     return (
         "Execution mode: confirm.\n"
@@ -629,6 +635,34 @@ def execution_ack_message(execution_mode: str) -> str:
     if execution_mode == "research":
         return "了解しました。調査します。"
     return ""
+
+
+def business_completion_from_text(text: str, returncode: int) -> tuple[bool, str]:
+    """Separate process success from business success.
+
+    Codex can exit normally while reporting that publication, upload, or video
+    generation did not finish. kdeck should not show that as a completed
+    business task.
+    """
+    if returncode != 0:
+        return False, "failed"
+    lowered = text.lower()
+    incomplete_markers = [
+        "未完了",
+        "できませんでした",
+        "失敗しました",
+        "到達できませんでした",
+        "公開urlはまだ",
+        "404",
+        "not completed",
+        "incomplete",
+        "failed",
+        "could not",
+        "timed out",
+    ]
+    if any(marker in lowered for marker in incomplete_markers):
+        return False, "incomplete"
+    return True, "completed"
 
 
 def save_agent_task(task: dict[str, Any]) -> None:
@@ -853,7 +887,7 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", executi
     if job_id:
         CHAT_PROCESSES[job_id] = proc
     try:
-        stdout, stderr = proc.communicate(input=prompt, timeout=900)
+        stdout, stderr = proc.communicate(input=prompt, timeout=CODEX_EXEC_TIMEOUT)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -862,7 +896,7 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", executi
         stdout, stderr = proc.communicate()
         return {
             "returncode": 124,
-            "text": "Codex CLI timed out after 900 seconds.",
+            "text": f"Codex CLI timed out after {CODEX_EXEC_TIMEOUT} seconds.",
             "stderr_tail": (stderr or "")[-4000:],
             "events": [],
         }
@@ -1367,10 +1401,16 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         )
         result = run_remote_agent(agent, remote_req, thread_id, job_id)
     assistant_text = result["text"] or "(no response)"
+    business_ok, business_status = business_completion_from_text(
+        assistant_text,
+        int(result["returncode"] or 0),
+    )
     history.append({"role": "assistant", "content": assistant_text})
     save_thread(thread_id, str(cwd), model, target_agent, local_cwd, remote_llm_backend, remote_model)
     return {
-        "ok": result["returncode"] == 0,
+        "ok": business_ok,
+        "process_ok": result["returncode"] == 0,
+        "business_status": business_status,
         "thread_id": thread_id,
         "model": model,
         "remote_llm_backend": remote_llm_backend,
