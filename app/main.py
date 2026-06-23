@@ -117,6 +117,7 @@ if DEFAULT_EXECUTION_MODE not in CODEX_EXECUTION_MODES:
 CODEX_EXEC_TIMEOUT = int(os.environ.get("KDECK_CODEX_EXEC_TIMEOUT", "3600"))
 CHAT_DIR = DATA_DIR / "chat_threads"
 TASK_DIR = DATA_DIR / "agent_tasks"
+TASK_LOG_DIR = DATA_DIR / "agent_task_logs"
 MEMORY_DIR = DATA_DIR / "shared_memory"
 CHAT_SAVE_MESSAGE_LIMIT = 120
 CHAT_PROMPT_MESSAGE_LIMIT = 80
@@ -457,6 +458,10 @@ def task_path(task_id: str) -> Path:
     return TASK_DIR / f"{task_id}.json"
 
 
+def task_log_path(task_id: str) -> Path:
+    return TASK_LOG_DIR / f"{task_id}.log"
+
+
 def memory_path(task_id: str) -> Path:
     return MEMORY_DIR / f"{task_id}.json"
 
@@ -687,6 +692,76 @@ def load_agent_task(task_id: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def append_agent_task_log(task_id: str, message: str, level: str = "info", details: dict[str, Any] | None = None) -> None:
+    task_id = safe_task_id(task_id)
+    if not task_id:
+        return
+    TASK_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    record = {
+        "ts": int(time.time()),
+        "level": level,
+        "message": message,
+    }
+    if details:
+        record["details"] = details
+    with task_log_path(task_id).open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def read_agent_task_log(task_id: str, max_chars: int = 20000) -> str:
+    task_id = safe_task_id(task_id)
+    if not task_id:
+        return ""
+    path = task_log_path(task_id)
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    if len(text) > max_chars:
+        text = text[-max_chars:]
+    return text
+
+
+def load_chat_job_or_404(job_id: str) -> dict[str, Any]:
+    job_id = safe_task_id(job_id)
+    if not job_id:
+        raise HTTPException(status_code=404, detail="chat job not found")
+    job = CHAT_JOBS.get(job_id) or load_agent_task(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="chat job not found")
+    return job
+
+
+def build_agent_task_report(job: dict[str, Any]) -> dict[str, Any]:
+    created = int(job.get("created") or 0)
+    finished = int(job.get("finished") or 0)
+    now = int(time.time())
+    elapsed = (finished or now) - created if created else 0
+    return {
+        "ok": True,
+        "job_id": job.get("job_id") or "",
+        "thread_id": job.get("thread_id") or "",
+        "status": job.get("status") or "",
+        "process_ok": bool(job.get("process_ok")) if "process_ok" in job else None,
+        "business_status": job.get("business_status") or "",
+        "target_agent": job.get("target_agent") or "local",
+        "agent_role": job.get("agent_role") or "",
+        "cwd": job.get("cwd") or "",
+        "local_cwd": job.get("local_cwd") or "",
+        "execution_mode": job.get("execution_mode") or "",
+        "sandbox": job.get("sandbox") or "",
+        "model": job.get("model") or "",
+        "remote_llm_backend": job.get("remote_llm_backend") or "",
+        "remote_model": job.get("remote_model") or "",
+        "remote_job": job.get("remote_job") or {},
+        "created": created,
+        "finished": finished,
+        "elapsed": max(0, elapsed),
+        "error": job.get("error") or "",
+        "stderr_tail": job.get("stderr_tail") or "",
+        "log_tail": read_agent_task_log(str(job.get("job_id") or ""), 8000),
+    }
+
+
 def summarize_for_memory(text: str, limit: int = 1200) -> str:
     text = re.sub(r"\s+", " ", text or "").strip()
     if len(text) <= limit:
@@ -886,6 +961,7 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", executi
     )
     if job_id:
         CHAT_PROCESSES[job_id] = proc
+        append_agent_task_log(job_id, "Codex CLI process started", details={"pid": proc.pid, "cmd": " ".join(cmd[:-1] + ["-"])})
     try:
         stdout, stderr = proc.communicate(input=prompt, timeout=CODEX_EXEC_TIMEOUT)
     except subprocess.TimeoutExpired:
@@ -894,6 +970,7 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", executi
         except ProcessLookupError:
             pass
         stdout, stderr = proc.communicate()
+        append_agent_task_log(job_id, "Codex CLI timed out", "error", {"timeout": CODEX_EXEC_TIMEOUT, "stderr_tail": (stderr or "")[-1200:]})
         return {
             "returncode": 124,
             "text": f"Codex CLI timed out after {CODEX_EXEC_TIMEOUT} seconds.",
@@ -918,6 +995,12 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", executi
             final_text = str(event.get("error", {}).get("message", "Codex turn failed"))
     if proc.returncode != 0 and not final_text:
         final_text = (stderr or stdout or f"codex exited with {proc.returncode}").strip()
+    if job_id:
+        append_agent_task_log(job_id, "Codex CLI process finished", details={
+            "returncode": proc.returncode,
+            "events": len(events),
+            "stderr_tail": (stderr or "")[-1200:],
+        })
     return {
         "returncode": proc.returncode,
         "text": final_text,
@@ -1329,13 +1412,27 @@ def chat(req: ChatRequest) -> dict[str, Any]:
         "created": int(time.time()),
         "finished": 0,
     }
+    append_agent_task_log(job_id, "chat job queued", details={
+        "thread_id": thread_id,
+        "target_agent": target_agent,
+        "cwd": str(cwd),
+        "execution_mode": execution_mode,
+        "sandbox": sandbox,
+        "model": model,
+    })
 
     def worker() -> None:
         try:
+            append_agent_task_log(job_id, "chat job worker started")
             result = run_chat_turn(cwd, model, thread_id, req.prompt, job_id, execution_mode, target_agent, req.local_cwd, remote_llm_backend, remote_model)
             CHAT_JOBS[job_id].update(result)
             CHAT_JOBS[job_id]["status"] = "finished"
             CHAT_JOBS[job_id]["finished"] = int(time.time())
+            append_agent_task_log(job_id, "chat job finished", details={
+                "process_ok": result.get("process_ok"),
+                "business_status": result.get("business_status"),
+                "target_agent": result.get("target_agent"),
+            })
         except Exception as exc:
             CHAT_JOBS[job_id].update({
                 "ok": False,
@@ -1343,6 +1440,7 @@ def chat(req: ChatRequest) -> dict[str, Any]:
                 "error": str(exc),
                 "finished": int(time.time()),
             })
+            append_agent_task_log(job_id, "chat job failed", "error", {"error": str(exc)})
         finally:
             save_agent_task(CHAT_JOBS[job_id])
             save_shared_memory(CHAT_JOBS[job_id], str(CHAT_JOBS[job_id].get("message") or CHAT_JOBS[job_id].get("error") or ""))
@@ -1386,8 +1484,14 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         history.append({"role": "assistant", "content": ack_message})
     save_thread(thread_id, str(cwd), model, target_agent, local_cwd, remote_llm_backend, remote_model)
     if agent.get("kind") == "local":
+        append_agent_task_log(job_id, "dispatching local Codex CLI", details={"cwd": str(cwd), "model": model, "sandbox": sandbox})
         result = run_codex_exec(cwd, model, prompt, job_id, execution_mode)
     else:
+        append_agent_task_log(job_id, "dispatching remote agent", details={
+            "target_agent": target_agent,
+            "host": agent.get("host") or "",
+            "remote_llm_backend": remote_llm_backend or str(agent.get("default_llm_backend") or "codex-cli"),
+        })
         remote_req = ChatRequest(
             prompt=prompt,
             cwd=str(cwd),
@@ -1439,11 +1543,24 @@ def chat_job(job_id: str) -> dict[str, Any]:
             job["error"] = "API restart interrupted this chat job. Please send the request again."
             job["message"] = "API再起動により、このチャット実行は中断されました。もう一度送信してください。"
             job["finished"] = int(time.time())
+            append_agent_task_log(job_id, "chat job marked interrupted after API restart", "warning")
             save_agent_task(job)
         CHAT_JOBS[job_id] = job
     if job.get("status") == "running":
         job["elapsed"] = int(time.time()) - int(job.get("created") or time.time())
     return job
+
+
+@app.get("/api/chat/{job_id}/report", dependencies=[Depends(require_auth)])
+def chat_job_report(job_id: str) -> dict[str, Any]:
+    return build_agent_task_report(load_chat_job_or_404(job_id))
+
+
+@app.get("/api/chat/{job_id}/logs", dependencies=[Depends(require_auth)])
+def chat_job_logs(job_id: str) -> dict[str, Any]:
+    job = load_chat_job_or_404(job_id)
+    task_id = str(job.get("job_id") or job_id)
+    return {"ok": True, "job_id": task_id, "log": read_agent_task_log(task_id)}
 
 
 @app.post("/api/chat/{job_id}/cancel", dependencies=[Depends(require_auth)])
@@ -1463,6 +1580,8 @@ def cancel_chat_job(job_id: str) -> dict[str, Any]:
         "error": "cancelled",
         "finished": int(time.time()),
     })
+    append_agent_task_log(job_id, "chat job cancelled", "warning")
+    save_agent_task(job)
     return job
 
 

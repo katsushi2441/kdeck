@@ -143,6 +143,18 @@ if (isset($_GET['api']) && $_GET['api'] === 'chat_job') {
     echo json_encode(kdeck_api('GET', '/api/chat/' . rawurlencode($id)), JSON_UNESCAPED_UNICODE);
     exit;
 }
+if (isset($_GET['api']) && $_GET['api'] === 'chat_report') {
+    header('Content-Type: application/json; charset=UTF-8');
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
+    echo json_encode(kdeck_api('GET', '/api/chat/' . rawurlencode($id) . '/report'), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+if (isset($_GET['api']) && $_GET['api'] === 'chat_logs') {
+    header('Content-Type: application/json; charset=UTF-8');
+    $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
+    echo json_encode(kdeck_api('GET', '/api/chat/' . rawurlencode($id) . '/logs'), JSON_UNESCAPED_UNICODE);
+    exit;
+}
 if (isset($_GET['api']) && $_GET['api'] === 'chat_cancel') {
     header('Content-Type: application/json; charset=UTF-8');
     $id = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['id'] ?? '');
@@ -660,6 +672,46 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  chatlog.scrollTop = chatlog.scrollHeight;
 	  return div;
 	}
+	function formatJobReport(report){
+	  const lines = [
+	    `Job: ${report.job_id || '-'}`,
+	    `Status: ${report.status || '-'} / Business: ${report.business_status || '-'}`,
+	    `Agent: ${report.target_agent || 'local'}${report.agent_role ? ' / ' + report.agent_role : ''}`,
+	    `Mode: ${report.execution_mode || '-'} / Sandbox: ${report.sandbox || '-'}`,
+	    `Folder: ${report.cwd || '-'}`,
+	    `Elapsed: ${Number(report.elapsed || 0)}秒`,
+	  ];
+	  if(report.remote_llm_backend) lines.push(`Remote LLM: ${report.remote_llm_backend} / ${report.remote_model || report.model || '-'}`);
+	  if(report.error) lines.push(`Error: ${report.error}`);
+	  if(report.stderr_tail) lines.push(`\nSTDERR tail:\n${report.stderr_tail}`);
+	  if(report.log_tail) lines.push(`\nLog tail:\n${report.log_tail}`);
+	  return lines.join('\n');
+	}
+	async function appendJobDetail(jobId, kind){
+	  const label = kind === 'logs' ? 'Logs' : 'Report';
+	  const detail = addBubble('assistant', `${label}を取得中...`);
+	  try{
+	    const res = await fetch(`?api=${kind === 'logs' ? 'chat_logs' : 'chat_report'}&id=${encodeURIComponent(jobId)}`, {cache:'no-store'});
+	    const data = await res.json();
+	    detail.textContent = kind === 'logs' ? (data.log || 'ログはまだありません。') : formatJobReport(data);
+	  }catch(e){
+	    detail.textContent = `${label}の取得に失敗しました。`;
+	  }
+	}
+	function attachJobInspectControls(line, jobId){
+	  const report = document.createElement('button');
+	  report.type = 'button';
+	  report.className = 'secondary';
+	  report.textContent = 'Report';
+	  report.addEventListener('click', () => appendJobDetail(jobId, 'report'));
+	  const logs = document.createElement('button');
+	  logs.type = 'button';
+	  logs.className = 'secondary';
+	  logs.textContent = 'Logs';
+	  logs.addEventListener('click', () => appendJobDetail(jobId, 'logs'));
+	  line.appendChild(report);
+	  line.appendChild(logs);
+	}
 	function attachRunControls(bubble, jobId){
 	  const line = document.createElement('div');
 	  line.className = 'runline';
@@ -681,6 +733,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  });
 	  line.appendChild(status);
 	  line.appendChild(cancel);
+	  attachJobInspectControls(line, jobId);
 	  bubble.appendChild(line);
 	  return {line, status, cancel};
 	}
@@ -842,6 +895,14 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		    if(job.thread_id) chatThread = job.thread_id;
 		    if(chatThread) localStorage.setItem('kdeck.thread', chatThread);
 	    pending.textContent = job.message || job.error || job.detail || JSON.stringify(job, null, 2);
+	    const finishedLine = document.createElement('div');
+	    finishedLine.className = 'runline';
+	    const finishedStatus = document.createElement('span');
+	    finishedStatus.className = 'muted';
+	    finishedStatus.textContent = `完了: ${job.status || 'finished'}${job.business_status ? ' / ' + job.business_status : ''}`;
+	    finishedLine.appendChild(finishedStatus);
+	    attachJobInspectControls(finishedLine, data.job_id);
+	    pending.appendChild(finishedLine);
 	    chatlog.scrollTop = chatlog.scrollHeight;
 	    chatTitle.textContent = prompt.length > 52 ? prompt.slice(0, 52) + '...' : prompt;
 	    setChatState(job.status || 'finished');
