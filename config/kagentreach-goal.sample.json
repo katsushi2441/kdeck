@@ -1,0 +1,41 @@
+{
+  "goal_name": "kagentreach-monetization-daily",
+  "worker_name": "kagentreach-monetization-daily-enqueue",
+  "description": "海外のClaude Code/Codex/Web3/バイブコーディング収益化系長尺動画を1日1本収集し、Kurage Montage動画化、AI OSS技術解説ブログ、はてな/Blogger転載、AIxSNS告知まで実行",
+  "function_name": "kagentreach_jobs.run_daily_digest_job",
+  "queue": "ollama-192-168-0-14-worker",
+  "resource": "network+kmontage+ollama:192.168.0.3:gemma4:12b-it-qat",
+  "daily_target": 1,
+  "per_run_target": 1,
+  "max_runs_per_day": 1,
+  "cooldown_seconds": 86400,
+  "priority": 87,
+  "enabled": 1,
+  "payload": {
+    "kwargs": {
+      "dry_run": false,
+      "source": "worker_auto",
+      "limit_per_query": 8,
+      "timeout_seconds": 7200
+    },
+    "meta": {
+      "project": "kagentreach",
+      "app": "monetization_daily",
+      "kind": "youtube_monetization_digest",
+      "source": "worker_auto",
+      "resource": "network+kmontage+ollama",
+      "ollama_host": "192.168.0.3",
+      "ollama_model": "gemma4:12b-it-qat",
+      "worker_name": "kagentreach-monetization-daily-enqueue"
+    },
+    "timeout": 7200,
+    "result_ttl": 86400,
+    "failure_ttl": 604800,
+    "evaluation": {
+      "item_count_keys": [
+        "created",
+        "items"
+      ]
+    }
+  }
+}

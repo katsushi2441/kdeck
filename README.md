@@ -198,6 +198,11 @@ job implementation code, while kdeck owns goal state, scheduling, hold/resume,
 cooldown, daily targets, and enqueue decisions. rqdb4ai owns generic queue
 execution and job status visibility.
 
+`kagentreach-monetization-daily` follows the same rule: kagentreach owns the
+application job (`kagentreach_jobs.run_daily_digest_job`), kdeck owns the
+daily schedule/target/cooldown, and rqdb4ai owns queue execution. A reference
+goal definition is stored in `config/kagentreach-goal.sample.json`.
+
 Goal Queue has two broad classes:
 
 - `kgrowth-*` goals run as a 24/365 loop: log analysis, improvement-plan
