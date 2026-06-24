@@ -209,6 +209,12 @@ war/geopolitics OSINT YouTube workflow. kagentreach exposes
 goal, and rqdb4ai runs it on `kurage-video-worker`. The reference goal is in
 `config/kagentreach-geopolitics-osint-goal.sample.json`.
 
+`kurage-shorts-youtube-upload` posts high-view existing Kurage vertical shorts
+to normal YouTube Shorts. The code lives in the Kurage repository as
+`kurage_shorts_upload_jobs.run_kurage_shorts_upload_job`; kdeck limits it to one
+upload every 8 hours and at most 3 uploads per JST day. The reference goal is in
+`config/kurage-shorts-youtube-upload-goal.sample.json`.
+
 Goal Queue has two broad classes:
 
 - `kgrowth-*` goals run as a 24/365 loop: log analysis, improvement-plan

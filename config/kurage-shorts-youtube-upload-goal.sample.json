@@ -1,0 +1,44 @@
+{
+  "goal_name": "kurage-shorts-youtube-upload",
+  "worker_name": "kurage-shorts-youtube-upload-enqueue",
+  "description": "アクセス数の多い未投稿Kurage縦型ショート動画を、8時間ごとに1本、1日最大3本YouTube Shortsへ投稿し、Kurage job JSON更新とAIxSNS告知まで実行",
+  "function_name": "kurage_shorts_upload_jobs.run_kurage_shorts_upload_job",
+  "queue": "kurage-video-worker",
+  "resource": "kurage+youtube+shorts",
+  "daily_target": 3,
+  "per_run_target": 1,
+  "max_runs_per_day": 3,
+  "cooldown_seconds": 28800,
+  "priority": 85,
+  "enabled": 1,
+  "payload": {
+    "kwargs": {
+      "source": "worker_auto",
+      "cooldown_hours": 8,
+      "max_per_day": 3,
+      "time_zone": "Asia/Tokyo",
+      "privacy": "public",
+      "announce_aixsns": 1,
+      "announce_x": 0,
+      "x_browser_use": 1,
+      "timeout_seconds": 2400
+    },
+    "meta": {
+      "project": "kurage",
+      "app": "youtube_shorts_upload",
+      "kind": "kurage_high_view_shorts_upload",
+      "source": "worker_auto",
+      "resource": "kurage+youtube+shorts",
+      "worker_name": "kurage-shorts-youtube-upload-enqueue"
+    },
+    "timeout": 2700,
+    "result_ttl": 86400,
+    "failure_ttl": 604800,
+    "evaluation": {
+      "item_count_keys": [
+        "created",
+        "items"
+      ]
+    }
+  }
+}
