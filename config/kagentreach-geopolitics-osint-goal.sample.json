@@ -1,0 +1,40 @@
+{
+  "goal_name": "kagentreach-geopolitics-osint-video",
+  "worker_name": "kagentreach-geopolitics-osint-video-enqueue",
+  "description": "戦争・地政学OSINTの公開情報とライセンス確認済み映像を収集し、10分程度のYouTube動画、entertainment.php記事、AIxSNS告知まで1日1本実行",
+  "function_name": "kagentreach_jobs.run_geopolitics_osint_video_job",
+  "queue": "kurage-video-worker",
+  "resource": "kurage_web+youtube+licensed_footage",
+  "daily_target": 1,
+  "per_run_target": 1,
+  "max_runs_per_day": 1,
+  "cooldown_seconds": 86400,
+  "priority": 86,
+  "enabled": 1,
+  "payload": {
+    "kwargs": {
+      "dry_run": false,
+      "source": "worker_auto",
+      "topic": "直近の地政学・紛争OSINT解説",
+      "target_minutes": 10,
+      "target_count": 24
+    },
+    "meta": {
+      "project": "kagentreach",
+      "app": "geopolitics_osint_video",
+      "kind": "geopolitics_osint_youtube_video",
+      "source": "worker_auto",
+      "resource": "kurage_web+youtube+licensed_footage",
+      "worker_name": "kagentreach-geopolitics-osint-video-enqueue"
+    },
+    "timeout": 7200,
+    "result_ttl": 86400,
+    "failure_ttl": 604800,
+    "evaluation": {
+      "item_count_keys": [
+        "created",
+        "items"
+      ]
+    }
+  }
+}

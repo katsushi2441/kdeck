@@ -203,6 +203,12 @@ application job (`kagentreach_jobs.run_daily_digest_job`), kdeck owns the
 daily schedule/target/cooldown, and rqdb4ai owns queue execution. A reference
 goal definition is stored in `config/kagentreach-goal.sample.json`.
 
+`kagentreach-geopolitics-osint-video` uses the same ownership model for the
+war/geopolitics OSINT YouTube workflow. kagentreach exposes
+`kagentreach_jobs.run_geopolitics_osint_video_job`, kdeck controls the once-a-day
+goal, and rqdb4ai runs it on `kurage-video-worker`. The reference goal is in
+`config/kagentreach-geopolitics-osint-goal.sample.json`.
+
 Goal Queue has two broad classes:
 
 - `kgrowth-*` goals run as a 24/365 loop: log analysis, improvement-plan
