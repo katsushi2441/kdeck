@@ -575,7 +575,9 @@ def worker_status() -> dict[str, Any]:
 def daily_totals(conn: sqlite3.Connection, goal_id: int, day: str) -> dict[str, int]:
     row = conn.execute(
         """
-        SELECT COUNT(*) AS runs, COALESCE(SUM(items), 0) AS items
+        SELECT
+          COALESCE(SUM(CASE WHEN items > 0 OR business_status IN ('failed', 'error') THEN 1 ELSE 0 END), 0) AS runs,
+          COALESCE(SUM(items), 0) AS items
         FROM goal_runs
         WHERE goal_id = ? AND day = ? AND finished_at != ''
           AND business_status != 'canceled'
@@ -1139,6 +1141,13 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
         status = "cooldown"
         cooldown_until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=int(goal.get("cooldown_seconds") or DEFAULT_COOLDOWN_SECONDS))).isoformat()
         note = f"run ok: +{evaluation['items']} items, today {totals['items']}/{goal['daily_target']}"
+    elif int(evaluation.get("items") or 0) == 0 and str(evaluation.get("status") or "") == "under_target":
+        status = "waiting"
+        cooldown_until = ""
+        reason = str(evaluation.get("note") or "").strip()
+        note = "no items created; retry without consuming daily run quota"
+        if reason:
+            note += f" / {reason}"
     else:
         status = "cooldown"
         cooldown_until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=max(600, int(goal.get("cooldown_seconds") or DEFAULT_COOLDOWN_SECONDS)))).isoformat()
