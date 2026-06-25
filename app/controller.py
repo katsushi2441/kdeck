@@ -614,6 +614,23 @@ def last_goal_run(conn: sqlite3.Connection, goal_id: int) -> dict[str, Any]:
     return row_dict(row)
 
 
+def latest_open_goal_run(conn: sqlite3.Connection, goal_id: int) -> dict[str, Any]:
+    row = conn.execute(
+        """
+        SELECT *
+        FROM goal_runs
+        WHERE goal_id = ?
+          AND finished_at = ''
+          AND business_status = 'running'
+          AND job_id != ''
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (goal_id,),
+    ).fetchone()
+    return row_dict(row)
+
+
 def is_kgrowth_goal(goal: dict[str, Any]) -> bool:
     return str(goal.get("goal_name") or "").startswith("kgrowth-")
 
@@ -704,6 +721,17 @@ def reconcile_goal_for_today(conn: sqlite3.Connection, goal: dict[str, Any], tot
             WHERE id = ?
             """,
             (desired_note, utc_now(), goal["id"]),
+        )
+        return True
+    open_run = latest_open_goal_run(conn, int(goal["id"]))
+    if open_run and status_value != "running":
+        conn.execute(
+            """
+            UPDATE goals
+            SET status = 'running', current_job_id = ?, last_note = ?, cooldown_until = '', updated_at = ?
+            WHERE id = ?
+            """,
+            (str(open_run.get("job_id") or ""), "RQジョブを実行中です", utc_now(), goal["id"]),
         )
         return True
     desired_status = effective_goal_status(goal, totals, now)

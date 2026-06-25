@@ -26,6 +26,8 @@ def goal_by_name(conn: sqlite3.Connection, goal_name: str) -> dict[str, Any]:
 def blocked_reason(conn: sqlite3.Connection, goal: dict[str, Any], day: str) -> tuple[str, dict[str, int]]:
     totals = controller.daily_totals(conn, int(goal["id"]), day)
     status_value = str(goal.get("status") or "")
+    if status_value == "running" or controller.latest_open_goal_run(conn, int(goal["id"])):
+        return "running", totals
     if status_value == "completed" and controller.is_kgrowth_goal(goal):
         return "completed", totals
     if controller.is_kgrowth_goal(goal) and controller.goal_has_successful_run(conn, int(goal["id"])):
@@ -36,8 +38,6 @@ def blocked_reason(conn: sqlite3.Connection, goal: dict[str, Any], day: str) -> 
         return "max_runs_reached", totals
     if status_value == "hold":
         return "hold", totals
-    if status_value == "running":
-        return "running", totals
     if not controller.cooldown_ready(goal):
         return "cooldown", totals
     return "", totals
