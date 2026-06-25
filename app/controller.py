@@ -675,7 +675,7 @@ def cooldown_until_from_last_run(conn: sqlite3.Connection, goal: dict[str, Any],
 
 def effective_goal_status(goal: dict[str, Any], totals: dict[str, int], now: dt.datetime) -> str:
     raw_status = str(goal.get("status") or "waiting")
-    if raw_status in {"running", "hold", "completed"}:
+    if raw_status in {"running", "hold"}:
         return raw_status
     if daily_target_reached(goal, totals):
         return "complete_today"
@@ -684,7 +684,7 @@ def effective_goal_status(goal: dict[str, Any], totals: dict[str, int], now: dt.
     cooldown_until = parse_iso_datetime(goal.get("cooldown_until"))
     if cooldown_until and cooldown_until > now:
         return "cooldown"
-    if raw_status in {"complete_today", "limit_today", "cooldown"}:
+    if raw_status in {"complete_today", "limit_today", "cooldown", "completed"}:
         return "waiting"
     return raw_status or "waiting"
 
@@ -725,7 +725,7 @@ def reconcile_goal_for_today(conn: sqlite3.Connection, goal: dict[str, Any], tot
             desired_note = f"cooldown after last run until {restored_cooldown_until}"
             desired_cooldown_until = restored_cooldown_until
             desired_current_job_id = ""
-        elif status_value in {"complete_today", "limit_today", "cooldown"}:
+        elif status_value in {"complete_today", "limit_today", "cooldown", "completed"}:
             desired_note = "new day or cooldown elapsed; goal is eligible again"
             desired_cooldown_until = ""
             desired_current_job_id = ""
