@@ -982,6 +982,20 @@ def evaluate_job(job: dict[str, Any], goal: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def is_manual_auth_required(goal: dict[str, Any], evaluation: dict[str, Any]) -> bool:
+    """Detect failures that cannot be fixed by automatic retries."""
+    goal_name = str(goal.get("goal_name") or "")
+    if goal_name != "kurage-shorts-youtube-upload":
+        return False
+    text = json.dumps(evaluation, ensure_ascii=False, default=str)
+    auth_markers = (
+        "invalid_grant",
+        "Token has been expired or revoked",
+        "refresh token",
+    )
+    return any(marker in text for marker in auth_markers)
+
+
 def _market_group_from_run_result(raw: str) -> str:
     try:
         detail = json.loads(raw or "{}")
@@ -1156,6 +1170,10 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
     if is_kgrowth_goal(goal) and evaluation["ok"]:
         status = "completed"
         note = f"kgrowth improvement completed permanently: {evaluation['note'] or goal['goal_name']}"
+        cooldown_until = ""
+    elif is_manual_auth_required(goal, evaluation):
+        status = "hold"
+        note = "YouTube認証が失効しています。再認証が終わるまで自動リトライを停止します。"
         cooldown_until = ""
     elif totals["items"] >= int(goal.get("daily_target") or 1):
         status = "complete_today"
