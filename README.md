@@ -203,11 +203,16 @@ application job (`kagentreach_jobs.run_daily_digest_job`), kdeck owns the
 daily schedule/target/cooldown, and rqdb4ai owns queue execution. A reference
 goal definition is stored in `config/kagentreach-goal.sample.json`.
 
-`kagentreach-geopolitics-osint-video` uses the same ownership model for the
-war/geopolitics OSINT YouTube workflow. kagentreach exposes
-`kagentreach_jobs.run_geopolitics_osint_video_job`, kdeck controls the once-a-day
-goal, and rqdb4ai runs it on `kurage-video-worker`. The reference goal is in
-`config/kagentreach-geopolitics-osint-goal.sample.json`.
+`kagentreach-ai-monetization-longform-video` uses the same ownership model for
+the AI/Web3/Codex/Claude Code/SNS monetization long-form YouTube workflow.
+kagentreach exposes
+`kagentreach_jobs.run_ai_monetization_longform_video_job`, kdeck controls the
+once-a-day goal, and rqdb4ai runs it on `kurage-video-worker`. The reference
+goal is in `config/kagentreach-ai-monetization-longform-goal.sample.json`.
+
+`kagentreach-geopolitics-osint-video` is kept as a disabled reference for the
+former war/geopolitics OSINT workflow. Do not re-enable it for the daily slot
+unless the content strategy explicitly returns to geopolitics.
 
 `kurage-shorts-youtube-upload` posts high-view existing Kurage vertical shorts
 to normal YouTube Shorts. The code lives in the Kurage repository as

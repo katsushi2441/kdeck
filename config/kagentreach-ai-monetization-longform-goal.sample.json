@@ -1,0 +1,43 @@
+{
+  "goal_name": "kagentreach-ai-monetization-longform-video",
+  "worker_name": "kagentreach-ai-monetization-longform-video-enqueue",
+  "description": "戦争OSINT枠の代替として、AI/Web3/Codex/Claude Code/SNS収益化系の公開情報とライセンス確認済み実写・画面素材を収集し、10分程度のYouTube動画、entertainment.php記事、AIxSNS告知まで1日1本実行",
+  "function_name": "kagentreach_jobs.run_ai_monetization_longform_video_job",
+  "queue": "kurage-video-worker",
+  "resource": "kurage_web+youtube+licensed_footage+ollama:192.168.0.3:gemma4:12b-it-qat",
+  "daily_target": 1,
+  "per_run_target": 1,
+  "max_runs_per_day": 1,
+  "cooldown_seconds": 86400,
+  "priority": 86,
+  "enabled": 1,
+  "payload": {
+    "kwargs": {
+      "dry_run": false,
+      "source": "worker_auto",
+      "topic": "AI/Web3/Codex/Claude Code/SNS収益化とOSS実装解説",
+      "target_minutes": 10,
+      "target_count": 24,
+      "timeout_seconds": 7200
+    },
+    "meta": {
+      "project": "kagentreach",
+      "app": "ai_monetization_longform_video",
+      "kind": "ai_web3_monetization_youtube_video",
+      "source": "worker_auto",
+      "resource": "kurage_web+youtube+licensed_footage+ollama",
+      "ollama_host": "192.168.0.3",
+      "ollama_model": "gemma4:12b-it-qat",
+      "worker_name": "kagentreach-ai-monetization-longform-video-enqueue"
+    },
+    "timeout": 7200,
+    "result_ttl": 86400,
+    "failure_ttl": 604800,
+    "evaluation": {
+      "item_count_keys": [
+        "created",
+        "items"
+      ]
+    }
+  }
+}
