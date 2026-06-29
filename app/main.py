@@ -87,7 +87,7 @@ REMOTE_OLLAMA_CANDIDATES = [
 REMOTE_BACKEND_DEFAULT_MODELS = {
     "codex-cli": CODEX_MODEL,
     "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "claude-sonnet-4-6"),
-    "ollama": os.environ.get("KDECK_REMOTE_OLLAMA_MODEL", "gemma4:e4b"),
+    "ollama": os.environ.get("KDECK_REMOTE_OLLAMA_MODEL", "gemma4:12b-it-qat"),
 }
 CODEX_EXECUTION_MODES = {
     "chat-only": {
