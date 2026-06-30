@@ -1260,7 +1260,14 @@ def status() -> dict[str, Any]:
     init_db()
     rq_summary = rq_get("/api/summary", timeout=12) if RQDB4AI_API_TOKEN else {"ok": False, "error": "RQDB4AI token is not configured"}
     with connect() as conn:
-        for row in conn.execute("SELECT * FROM goals WHERE enabled = 1 AND status = 'running' ORDER BY priority, id").fetchall():
+        for row in conn.execute(
+            """
+            SELECT * FROM goals
+            WHERE enabled = 1
+              AND (status = 'running' OR (status = 'hold' AND current_job_id != ''))
+            ORDER BY priority, id
+            """
+        ).fetchall():
             refresh_running_goal(conn, row_dict(row))
         day = today_key()
         now = dt.datetime.now(dt.timezone.utc)

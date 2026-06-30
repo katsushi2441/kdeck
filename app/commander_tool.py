@@ -9,6 +9,7 @@ from typing import Any
 from app import controller
 
 ENABLED_GOALS = "enabled = 1"
+REFRESHABLE_GOALS = f"{ENABLED_GOALS} AND (status = 'running' OR (status = 'hold' AND current_job_id != ''))"
 KGROWTH_ENABLED = "enabled = 1 AND goal_name LIKE 'kgrowth-%'"
 
 
@@ -91,7 +92,7 @@ def command_refresh(_args: argparse.Namespace) -> None:
     controller.init_db()
     changed: list[dict[str, Any]] = []
     with controller.connect() as conn:
-        rows = conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id").fetchall()
+        rows = conn.execute(f"SELECT * FROM goals WHERE {REFRESHABLE_GOALS} ORDER BY priority, id").fetchall()
         for row in rows:
             goal = controller.row_dict(row)
             changed.append({
@@ -107,7 +108,7 @@ def command_brief(_args: argparse.Namespace) -> None:
     controller.init_db()
     changed: list[dict[str, Any]] = []
     with controller.connect() as conn:
-        rows = conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id").fetchall()
+        rows = conn.execute(f"SELECT * FROM goals WHERE {REFRESHABLE_GOALS} ORDER BY priority, id").fetchall()
         for row in rows:
             goal = controller.row_dict(row)
             changed.append({
@@ -180,7 +181,7 @@ def command_enqueue(args: argparse.Namespace) -> None:
 def command_run_once(_args: argparse.Namespace) -> None:
     controller.init_db()
     with controller.connect() as conn:
-        running_rows = conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id").fetchall()
+        running_rows = conn.execute(f"SELECT * FROM goals WHERE {REFRESHABLE_GOALS} ORDER BY priority, id").fetchall()
         refreshed: list[dict[str, Any]] = []
         for row in running_rows:
             goal = controller.row_dict(row)
@@ -254,7 +255,7 @@ def should_force_kgrowth_after_completion(conn: sqlite3.Connection, _day: str) -
 def command_growth_cycle(args: argparse.Namespace) -> None:
     controller.init_db()
     with controller.connect() as conn:
-        running_rows = conn.execute(f"SELECT * FROM goals WHERE {ENABLED_GOALS} AND status = 'running' ORDER BY priority, id").fetchall()
+        running_rows = conn.execute(f"SELECT * FROM goals WHERE {REFRESHABLE_GOALS} ORDER BY priority, id").fetchall()
         refreshed: list[dict[str, Any]] = []
         for row in running_rows:
             goal = controller.row_dict(row)
