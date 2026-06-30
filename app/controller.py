@@ -1221,10 +1221,10 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
         cooldown_until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=int(goal.get("cooldown_seconds") or DEFAULT_COOLDOWN_SECONDS))).isoformat()
         note = f"run ok: +{evaluation['items']} items, today {totals['items']}/{goal['daily_target']}"
     elif int(evaluation.get("items") or 0) == 0 and str(evaluation.get("status") or "") == "under_target":
-        status = "waiting"
-        cooldown_until = ""
+        status = "cooldown"
+        cooldown_until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=int(goal.get("cooldown_seconds") or DEFAULT_COOLDOWN_SECONDS))).isoformat()
         reason = str(evaluation.get("note") or "").strip()
-        note = "no items created; retry without consuming daily run quota"
+        note = "no items created; retry after cooldown without consuming daily item quota"
         if reason:
             note += f" / {reason}"
     else:
