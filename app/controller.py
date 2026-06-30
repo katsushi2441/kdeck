@@ -1149,9 +1149,26 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
         return True
     detail = rq_get("/api/jobs/" + urllib.parse.quote(job_id), timeout=20)
     if not detail.get("ok"):
+        message = str(detail.get("error") or detail.get("detail") or detail)
+        if "No such job" in message:
+            now = utc_now()
+            conn.execute(
+                """
+                UPDATE goal_runs
+                SET rq_status = 'missing', business_status = 'failed', ok = 0,
+                    note = ?, result = ?, finished_at = ?
+                WHERE job_id = ? AND finished_at = ''
+                """,
+                (f"RQDB4AI job disappeared: {message}", json.dumps(detail, ensure_ascii=False), now, job_id),
+            )
+            conn.execute(
+                "UPDATE goals SET status = 'waiting', current_job_id = '', last_note = ?, updated_at = ? WHERE id = ?",
+                (f"stale RQDB4AI job cleared: {message}", now, goal["id"]),
+            )
+            return True
         conn.execute(
             "UPDATE goals SET status = 'hold', last_note = ?, updated_at = ? WHERE id = ?",
-            (f"RQDB4AI job detail unavailable: {detail.get('error') or detail}", utc_now(), goal["id"]),
+            (f"RQDB4AI job detail unavailable: {message}", utc_now(), goal["id"]),
         )
         return True
     job = detail.get("job") if isinstance(detail.get("job"), dict) else {}
