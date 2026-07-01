@@ -1,7 +1,7 @@
 {
   "goal_name": "kagentreach-ai-monetization-longform-video",
   "worker_name": "kagentreach-ai-monetization-longform-video-enqueue",
-  "description": "戦争OSINT枠の代替として、AI/Web3/Codex/Claude Code/SNS収益化系の公開情報とライセンス確認済み実写・画面素材を収集し、10分程度のYouTube動画、entertainment.php記事、AIxSNS告知まで1日1本実行",
+  "description": "停止中: AI/Web3/Codex/Claude Code/SNS収益化系10分YouTube動画は品質不十分のため日次実行停止。再開は明示指示がある場合のみ。",
   "function_name": "kagentreach_jobs.run_ai_monetization_longform_video_job",
   "queue": "kurage-video-worker",
   "resource": "kurage_web+youtube+licensed_footage+ollama:192.168.0.14:gemma4:12b-it-qat",
@@ -10,7 +10,7 @@
   "max_runs_per_day": 1,
   "cooldown_seconds": 86400,
   "priority": 86,
-  "enabled": 1,
+  "enabled": 0,
   "payload": {
     "kwargs": {
       "dry_run": false,
@@ -28,7 +28,9 @@
       "resource": "kurage_web+youtube+licensed_footage+ollama",
       "ollama_host": "192.168.0.14",
       "ollama_model": "gemma4:12b-it-qat",
-      "worker_name": "kagentreach-ai-monetization-longform-video-enqueue"
+      "worker_name": "kagentreach-ai-monetization-longform-video-enqueue",
+      "disabled_reason": "品質不十分のため日次YouTube投稿を停止",
+      "stopped_at": "2026-07-01T02:53:10.540575+00:00"
     },
     "timeout": 7200,
     "result_ttl": 86400,
