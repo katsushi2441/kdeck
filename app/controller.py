@@ -1010,6 +1010,21 @@ def mark_auth_required(evaluation: dict[str, Any]) -> dict[str, Any]:
     return marked
 
 
+def upload_policy_next_allowed_at(evaluation: dict[str, Any]) -> str:
+    """Use the uploader's own cooldown when a run only checked too early."""
+    result = evaluation.get("result") if isinstance(evaluation.get("result"), dict) else {}
+    nested = result.get("result") if isinstance(result.get("result"), dict) else {}
+    if str(result.get("reason") or nested.get("reason") or "") != "cooldown-active":
+        return ""
+    policy = nested.get("policy") if isinstance(nested.get("policy"), dict) else result.get("policy")
+    if not isinstance(policy, dict):
+        return ""
+    next_allowed = parse_iso_datetime(policy.get("nextAllowedAt"))
+    if not next_allowed:
+        return ""
+    return next_allowed.isoformat()
+
+
 def _market_group_from_run_result(raw: str) -> str:
     try:
         detail = json.loads(raw or "{}")
@@ -1222,9 +1237,11 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
         note = f"run ok: +{evaluation['items']} items, today {totals['items']}/{goal['daily_target']}"
     elif int(evaluation.get("items") or 0) == 0 and str(evaluation.get("status") or "") == "under_target":
         status = "cooldown"
-        cooldown_until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=int(goal.get("cooldown_seconds") or DEFAULT_COOLDOWN_SECONDS))).isoformat()
+        cooldown_until = upload_policy_next_allowed_at(evaluation)
+        if not cooldown_until:
+            cooldown_until = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=int(goal.get("cooldown_seconds") or DEFAULT_COOLDOWN_SECONDS))).isoformat()
         reason = str(evaluation.get("note") or "").strip()
-        note = "no items created; retry after cooldown without consuming daily item quota"
+        note = "no items created; retry after uploader cooldown without consuming daily item quota"
         if reason:
             note += f" / {reason}"
     else:
