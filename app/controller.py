@@ -591,6 +591,8 @@ def parse_iso_datetime(value: Any) -> dt.datetime | None:
     text = str(value or "").strip()
     if not text:
         return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
     try:
         parsed = dt.datetime.fromisoformat(text)
     except ValueError:
