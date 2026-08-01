@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import subprocess
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,6 +33,16 @@ KGROWTH_DIR = Path(KGROWTH_DIR_RAW).expanduser() if KGROWTH_DIR_RAW else None
 KGROWTH_CONFIG = os.environ.get("KDECK_KGROWTH_CONFIG", "config.json")
 KGROWTH_MIN_INTERVAL_SECONDS = int(os.environ.get("KDECK_KGROWTH_MIN_INTERVAL_SECONDS", "21600"))
 MAX_ACTIVE_GOALS = int(os.environ.get("KDECK_MAX_ACTIVE_GOALS", "6"))
+SQLITE_BUSY_TIMEOUT_MS = int(os.environ.get("KDECK_SQLITE_BUSY_TIMEOUT_MS", "30000"))
+_DB_INIT_LOCK = threading.RLock()
+_DB_INITIALIZED = False
+_STATUS_LOCK = threading.RLock()
+_EXTERNAL_STATUS_LOCK = threading.Lock()
+_EXTERNAL_STATUS_CACHE: dict[str, Any] = {
+    "expires": 0.0,
+    "rqdb4ai": {"ok": False, "refreshing": True},
+    "worker_status": {"ok": False, "refreshing": True},
+}
 KGROWTH_EXECUTABLE_KINDS = {
     item.strip()
     for item in os.environ.get(
@@ -89,16 +100,25 @@ def today_key() -> str:
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn = sqlite3.connect(DB_PATH, timeout=max(1, SQLITE_BUSY_TIMEOUT_MS // 1000))
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
     return conn
 
 
 def init_db() -> None:
-    with connect() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS goals (
+    global _DB_INITIALIZED
+    if _DB_INITIALIZED:
+        return
+    with _DB_INIT_LOCK:
+        if _DB_INITIALIZED:
+            return
+        with connect() as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS goals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 goal_name TEXT NOT NULL UNIQUE,
                 worker_name TEXT NOT NULL,
@@ -120,8 +140,8 @@ def init_db() -> None:
                 payload TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS goal_runs (
+                );
+                CREATE TABLE IF NOT EXISTS goal_runs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 goal_id INTEGER NOT NULL,
                 day TEXT NOT NULL,
@@ -134,26 +154,26 @@ def init_db() -> None:
                 result TEXT NOT NULL DEFAULT '{}',
                 started_at TEXT NOT NULL,
                 finished_at TEXT NOT NULL DEFAULT ''
-            );
-            CREATE TABLE IF NOT EXISTS controller_events (
+                );
+                CREATE TABLE IF NOT EXISTS controller_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 level TEXT NOT NULL,
                 message TEXT NOT NULL,
                 data TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS controller_state (
+                );
+                CREATE TABLE IF NOT EXISTS controller_state (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL DEFAULT '',
                 updated_at TEXT NOT NULL
-            );
-            """
-        )
-        now = utc_now()
-        for goal in DEFAULT_GOALS:
-            conn.execute(
+                );
                 """
-                INSERT INTO goals (
+            )
+            now = utc_now()
+            for goal in DEFAULT_GOALS:
+                conn.execute(
+                    """
+                    INSERT INTO goals (
                     goal_name, worker_name, description, function_name, queue, resource,
                     daily_target, per_run_target, max_runs_per_day, cooldown_seconds,
                     priority, enabled, payload, created_at, updated_at
@@ -172,26 +192,27 @@ def init_db() -> None:
                     priority = excluded.priority,
                     enabled = excluded.enabled,
                     payload = excluded.payload
-                """,
-                (
-                    goal["goal_name"],
-                    goal["worker_name"],
-                    goal["description"],
-                    goal["function_name"],
-                    goal["queue"],
-                    goal["resource"],
-                    goal["daily_target"],
-                    goal["per_run_target"],
-                    goal["max_runs_per_day"],
-                    goal["cooldown_seconds"],
-                    goal["priority"],
-                    goal["enabled"],
-                    json.dumps(goal["payload"], ensure_ascii=False),
-                    now,
-                    now,
-                ),
-            )
-        sync_kgrowth_improvement_goals(conn, now)
+                    """,
+                    (
+                        goal["goal_name"],
+                        goal["worker_name"],
+                        goal["description"],
+                        goal["function_name"],
+                        goal["queue"],
+                        goal["resource"],
+                        goal["daily_target"],
+                        goal["per_run_target"],
+                        goal["max_runs_per_day"],
+                        goal["cooldown_seconds"],
+                        goal["priority"],
+                        goal["enabled"],
+                        json.dumps(goal["payload"], ensure_ascii=False),
+                        now,
+                        now,
+                    ),
+                )
+            sync_kgrowth_improvement_goals(conn, now)
+        _DB_INITIALIZED = True
 
 
 def sync_kgrowth_improvement_goals(conn: sqlite3.Connection, now: str | None = None) -> dict[str, Any]:
@@ -569,7 +590,7 @@ def worker_status() -> dict[str, Any]:
     url = urllib.parse.urlparse(WORKER_STATUS_URL)
     base = f"{url.scheme}://{url.netloc}"
     path = url.path + (("?" + url.query) if url.query else "")
-    return api_request("GET", base, path, timeout=12)
+    return api_request("GET", base, path, timeout=5)
 
 
 def daily_totals(conn: sqlite3.Connection, goal_id: int, day: str) -> dict[str, int]:
@@ -1277,29 +1298,9 @@ def cooldown_ready(goal: dict[str, Any]) -> bool:
 
 def status() -> dict[str, Any]:
     init_db()
-    rq_summary = rq_get("/api/summary", timeout=12) if RQDB4AI_API_TOKEN else {"ok": False, "error": "RQDB4AI token is not configured"}
-    with connect() as conn:
-        for row in conn.execute(
-            """
-            SELECT * FROM goals
-            WHERE enabled = 1
-              AND (status = 'running' OR (status = 'hold' AND current_job_id != ''))
-            ORDER BY priority, id
-            """
-        ).fetchall():
-            refresh_running_goal(conn, row_dict(row))
-        day = today_key()
-        now = dt.datetime.now(dt.timezone.utc)
-        goals = []
-        for row in conn.execute("SELECT * FROM goals WHERE enabled = 1 ORDER BY priority, id").fetchall():
-            goal = row_dict(row)
-            totals = daily_totals(conn, int(goal["id"]), day)
-            if reconcile_goal_for_today(conn, goal, totals, now):
-                goal = row_dict(conn.execute("SELECT * FROM goals WHERE id = ?", (goal["id"],)).fetchone())
-            latest = last_goal_run(conn, int(goal["id"]))
-            goals.append(enrich_goal_for_status(goal, totals, latest, now))
-        events = [row_dict(row) for row in conn.execute("SELECT * FROM controller_events ORDER BY id DESC LIMIT 30").fetchall()]
-    workers = worker_status()
+    rq_summary, workers = cached_external_status()
+    with _STATUS_LOCK:
+        day, goals, events = _database_status()
     return {
         "ok": True,
         "enabled": CONTROLLER_ENABLED,
@@ -1311,6 +1312,76 @@ def status() -> dict[str, Any]:
         "rqdb4ai": rq_summary,
         "worker_status": workers,
     }
+
+
+def _refresh_external_status() -> None:
+    try:
+        rq_summary = rq_get("/api/summary", timeout=5) if RQDB4AI_API_TOKEN else {"ok": False, "error": "RQDB4AI token is not configured"}
+        workers = worker_status()
+        _EXTERNAL_STATUS_CACHE.update({
+            "expires": dt.datetime.now().timestamp() + 30,
+            "rqdb4ai": rq_summary,
+            "worker_status": workers,
+        })
+    finally:
+        _EXTERNAL_STATUS_LOCK.release()
+
+
+def cached_external_status() -> tuple[dict[str, Any], dict[str, Any]]:
+    now = dt.datetime.now().timestamp()
+    if now >= float(_EXTERNAL_STATUS_CACHE.get("expires") or 0) and _EXTERNAL_STATUS_LOCK.acquire(blocking=False):
+        threading.Thread(target=_refresh_external_status, name="kdeck-status-refresh", daemon=True).start()
+    return (
+        dict(_EXTERNAL_STATUS_CACHE.get("rqdb4ai") or {}),
+        dict(_EXTERNAL_STATUS_CACHE.get("worker_status") or {}),
+    )
+
+
+def _database_status() -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    with connect() as conn:
+        day = today_key()
+        now = dt.datetime.now(dt.timezone.utc)
+        totals_by_goal = {
+            int(row["goal_id"]): {
+                "runs": int(row["runs"] or 0),
+                "items": int(row["items"] or 0),
+            }
+            for row in conn.execute(
+                """
+                SELECT goal_id,
+                       COALESCE(SUM(CASE WHEN items > 0 OR business_status IN ('failed', 'error') THEN 1 ELSE 0 END), 0) AS runs,
+                       COALESCE(SUM(items), 0) AS items
+                FROM goal_runs
+                WHERE day = ? AND finished_at != ''
+                  AND business_status NOT IN ('canceled', 'auth_required')
+                GROUP BY goal_id
+                """,
+                (day,),
+            ).fetchall()
+        }
+        latest_by_goal = {
+            int(row["goal_id"]): row_dict(row)
+            for row in conn.execute(
+                """
+                SELECT run.*
+                FROM goal_runs AS run
+                JOIN (
+                    SELECT goal_id, MAX(id) AS id
+                    FROM goal_runs
+                    GROUP BY goal_id
+                ) AS latest ON latest.id = run.id
+                """
+            ).fetchall()
+        }
+        goals = []
+        for row in conn.execute("SELECT * FROM goals WHERE enabled = 1 ORDER BY priority, id").fetchall():
+            goal = row_dict(row)
+            goal_id = int(goal["id"])
+            totals = totals_by_goal.get(goal_id, {"runs": 0, "items": 0})
+            latest = latest_by_goal.get(goal_id, {})
+            goals.append(enrich_goal_for_status(goal, totals, latest, now))
+        events = [row_dict(row) for row in conn.execute("SELECT * FROM controller_events ORDER BY id DESC LIMIT 30").fetchall()]
+    return day, goals, events
 
 
 def set_goal_status(goal_name: str, status_value: str) -> dict[str, Any]:

@@ -8,15 +8,21 @@
     {
       "id": "local",
       "label": "local",
-      "role": "local Codex",
+      "role": "local Codex / Claude Code",
       "host": "localhost",
       "kind": "local",
       "gateway_id": "",
       "allowed_roots": ["/path/to/project"],
       "folder_base": "/path/to",
       "project_folders": ["/path/to/project"],
-      "llm_backends": ["codex-cli"],
-      "default_llm_backend": "codex-cli"
+      "llm_backends": ["auto", "codex-cli", "claude-cli"],
+      "default_llm_backend": "auto",
+      "default_model": "gpt-5.6-sol",
+      "backend_default_models": {
+        "auto": "gpt-5.6-sol",
+        "codex-cli": "gpt-5.6-sol",
+        "claude-cli": "sonnet"
+      }
     }
   ]
 }

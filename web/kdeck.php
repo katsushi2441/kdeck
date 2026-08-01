@@ -195,7 +195,13 @@ $default_roots = [getcwd() ?: __DIR__];
 $roots = !empty($config['allowed_roots']) && is_array($config['allowed_roots'])
     ? $config['allowed_roots']
     : $default_roots;
-$codex_model = $config['codex_model'] ?? 'gpt-5.5';
+$codex_model = $config['codex_model'] ?? 'gpt-5.6-sol';
+$codex_models = !empty($config['codex_models']) && is_array($config['codex_models'])
+    ? $config['codex_models']
+    : ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'];
+$backend_labels = !empty($config['backend_labels']) && is_array($config['backend_labels'])
+    ? $config['backend_labels']
+    : ['auto' => 'Auto (Codex → Claude)', 'codex-cli' => 'Codex CLI', 'claude-cli' => 'Claude Code', 'ollama' => 'Ollama'];
 $execution_modes = !empty($config['execution_modes']) && is_array($config['execution_modes'])
     ? $config['execution_modes']
     : [
@@ -221,28 +227,28 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 <?php if ($GLOBALS['KDECK_OG_IMAGE'] !== ''): ?><meta name="twitter:image" content="<?=h($GLOBALS['KDECK_OG_IMAGE'])?>"><?php endif; ?>
 <style>
 	:root{--bg:#eef4f6;--panel:#ffffff;--line:#d5e1e6;--text:#17242c;--muted:#60717b;--brand:#087d9a;--brand2:#0f9b8e;--soft:#e9f5f6;--danger:#b03a2e}
-	*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif}header{position:sticky;top:0;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);z-index:2;backdrop-filter:blur(10px)}.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px}.brand{display:flex;align-items:center;gap:10px;font-weight:900;min-width:0}.brand-icon{width:42px;height:42px;border-radius:50%;object-fit:cover;box-shadow:0 2px 8px rgba(0,127,150,.18);flex:0 0 auto}.brand-title{display:grid;line-height:1.15;min-width:0}.brand-title b,.brand-title span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title span{font-size:12px;color:var(--muted);font-weight:700}.account{flex:0 0 auto;max-width:45vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}.wrap{display:grid;grid-template-columns:320px minmax(0,1fr) 380px;gap:12px;padding:12px;height:calc(100vh - 64px)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;min-height:0}.side{display:flex;flex-direction:column;overflow:hidden}.side-top{padding:12px;border-bottom:1px solid var(--line)}.main{display:flex;flex-direction:column;padding:0;overflow:hidden}.main-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}h2{font-size:16px;margin:0}.muted{color:var(--muted);font-size:12px}.logout{color:var(--brand);font-weight:800;text-decoration:none}.row{display:grid;gap:6px;margin-bottom:8px}input,select,textarea,button{font:inherit}input,select,textarea{width:100%;border:1px solid #c8d5dc;border-radius:6px;padding:8px;background:#fff}button{min-height:36px;border:0;border-radius:6px;background:var(--brand);color:#fff;font-weight:800;padding:8px 12px;cursor:pointer}button.secondary{background:#e7eef2;color:var(--text)}button.active{background:var(--danger);color:#fff}button:disabled{cursor:not-allowed;opacity:.55}.history-select{margin-top:8px;min-height:38px}.history{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px}.history-item{border:1px solid transparent;background:transparent;color:var(--text);text-align:left;font-weight:700;min-height:0;padding:9px;border-radius:6px}.history-item:hover,.history-item.active{background:var(--soft);border-color:#c5dde3}.history-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-meta{display:block;color:var(--muted);font-size:11px;font-weight:600;margin-top:3px}.chatlog{display:flex;flex-direction:column;gap:12px;flex:1;overflow:auto;padding:14px}.bubble{max-width:92%;border-radius:8px;padding:10px 12px;white-space:pre-wrap;line-height:1.55}.user{align-self:flex-end;background:#dff0f7}.assistant{align-self:flex-start;background:#f0f4f7}.runline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}.runline button{min-height:28px;padding:5px 9px;font-size:12px}.voicebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line)}.voicebar label{display:flex;align-items:center;gap:6px}.voicebar input{width:auto}.composer{display:grid;grid-template-columns:1fr auto auto;gap:8px;padding:0 14px 14px}.composer textarea{resize:vertical;min-height:82px}.empty-history{padding:10px;color:var(--muted);font-size:12px}body{background:linear-gradient(180deg,#f7fcfd 0%,#edf7f9 46%,#f8fbfb 100%);color:#17242c}header{background:rgba(255,255,255,.88);border-bottom-color:#cfe0e6;box-shadow:0 8px 24px rgba(36,78,92,.08)}.bar{height:60px;padding:9px 16px}.brand-icon{width:40px;height:40px}.brand-title b{color:#17313a}.brand-title span,.muted{color:#647884}.logout{color:#087d9a}.wrap{gap:14px;padding:14px;height:calc(100vh - 60px)}.panel{border:1px solid #d5e5ea;border-radius:8px;box-shadow:0 12px 34px rgba(36,78,92,.09)}.side{background:linear-gradient(180deg,#ffffff 0%,#eef9fb 100%)}.side-top{border-bottom:1px solid #d6e8ed}.side h2{color:#17313a}.main{background:#ffffff;color:#18252d}.main-head{min-height:52px;background:#ffffff;border-bottom:1px solid #dce9ee}.row label{letter-spacing:.02em;text-transform:uppercase}input,select,textarea{border-color:#c7d8df;background:#ffffff;color:#17242c}input:focus,select:focus,textarea:focus{outline:2px solid rgba(8,125,154,.16);border-color:#0b8aa6}button{background:#087d9a;box-shadow:0 3px 10px rgba(8,125,154,.16)}button:hover{filter:brightness(1.04)}button.secondary{background:#edf5f7;color:#17313a;box-shadow:none}button.danger{background:#b03a2e;color:#fff}.history{padding:9px}.history-item{color:#17313a;border-color:transparent}.history-item:hover,.history-item.active{background:#e5f5f7;border-color:#bfe0e8}.history-meta{color:#718691}.chatlog{background:linear-gradient(180deg,#ffffff 0%,#f1f8fa 100%)}.bubble{box-shadow:0 2px 8px rgba(36,78,92,.07)}.assistant{background:#ffffff;border:1px solid #dce9ee}.user{background:#dff4f7;border:1px solid #bfe4ec}.voicebar{background:#ffffff;border-top:1px solid #dce9ee}.composer{background:#ffffff}.memo-panel{background:#ffffff;border-top:1px solid #dce9ee;padding:0 14px 14px}.memo-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.memo-actions{display:flex;gap:8px;flex-wrap:wrap}.memo-actions button{min-height:30px;padding:6px 10px}.memo-panel textarea{min-height:96px;resize:vertical;background:#fbfeff}.ops{display:flex;flex-direction:column;gap:10px;padding:12px;overflow:auto}.ops-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.ops-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.metric{background:#f5fbfc;border:1px solid #d8e9ee;border-radius:8px;padding:9px;min-width:0}.metric b{display:block;font-size:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.metric.wide{grid-column:1/-1}.goal-card{border:1px solid #d8e9ee;border-radius:8px;background:#fff;padding:10px;display:grid;gap:8px}.goal-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.pill{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:900;background:#edf5f7;color:#17313a;white-space:nowrap}.pill.running{background:#fff1c7;color:#6c4b00}.pill.cooldown{background:#e8f1ff;color:#264f88}.pill.complete_today{background:#ddf7e6;color:#176139}.pill.limit_today{background:#fff1c7;color:#6c4b00}.pill.hold{background:#ffe5e1;color:#8a2c1c}.progress{height:8px;background:#e8f0f3;border-radius:999px;overflow:hidden}.progress>span{display:block;height:100%;background:linear-gradient(90deg,#0b8aa6,#19a889);width:0}.goal-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.goal-kv{background:#f7fbfc;border:1px solid #e0edf1;border-radius:6px;padding:6px;min-width:0}.goal-kv span{display:block;color:var(--muted);font-size:10px}.goal-kv b{display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.goal-note{font-size:12px;color:#40545d;line-height:1.45}.goal-actions{display:flex;gap:6px;flex-wrap:wrap}.goal-actions button{min-height:28px;padding:5px 9px;font-size:12px}.event-list{display:grid;gap:5px;font-size:12px}.event-item{padding:7px;border-radius:6px;background:#f7fbfc;border:1px solid #e0edf1}@media(max-width:820px){body{overflow:auto}.bar{height:54px;padding:7px 10px;align-items:center;flex-direction:row}.brand{gap:7px;flex:1 1 auto}.brand-icon{width:34px;height:34px}.brand-title b{font-size:14px}.brand-title span{display:none}.account{max-width:42vw;font-size:11px}.wrap{display:flex;flex-direction:column;gap:8px;height:auto;min-height:calc(100dvh - 54px);padding:8px;overflow:visible}.side{flex:0 0 auto;max-height:none;overflow:visible}.side-top{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px;padding:8px}.side-top h2{display:none}.side-top .row{margin:0;gap:3px}.side-top .row:first-of-type{grid-column:1/-1}.side-top .row label{font-size:10px}.side-top>button{min-height:34px;padding:7px 8px}.history-select{grid-column:1/-1;margin:0;min-height:38px}.side-top>.muted{display:none}.history{display:none}.main{flex:0 0 auto;min-height:0;overflow:visible}.main-head{min-height:42px;padding:8px 10px}.chatlog{flex:none;min-height:52dvh;max-height:70dvh;overflow:auto;padding:10px}.voicebar{padding:8px 10px}.composer{grid-template-columns:1fr auto;gap:7px;padding:0 10px 10px}.composer textarea{grid-column:1/-1;min-height:70px}.composer button{min-height:34px}.memo-panel{padding:0 10px 10px}.memo-head{align-items:flex-start;flex-direction:column;gap:6px}.memo-panel textarea{min-height:76px}.ops{padding:10px}.ops-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.metric{padding:7px}.metric b{font-size:15px}.goal-top{align-items:flex-start}.goal-card{padding:9px}.goal-status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+	*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans JP",sans-serif}header{position:sticky;top:0;background:rgba(255,255,255,.96);border-bottom:1px solid var(--line);z-index:2;backdrop-filter:blur(10px)}.bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px}.brand{display:flex;align-items:center;gap:10px;font-weight:900;min-width:0}.brand-icon{width:42px;height:42px;border-radius:50%;object-fit:cover;box-shadow:0 2px 8px rgba(0,127,150,.18);flex:0 0 auto}.brand-title{display:grid;line-height:1.15;min-width:0}.brand-title b,.brand-title span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand-title span{font-size:12px;color:var(--muted);font-weight:700}.account{flex:0 0 auto;max-width:45vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}.wrap{display:grid;grid-template-columns:320px minmax(0,1fr) 380px;gap:12px;padding:12px;height:calc(100vh - 64px)}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;min-height:0}.side{display:flex;flex-direction:column;overflow:hidden}.side-top{padding:12px;border-bottom:1px solid var(--line)}.main{display:flex;flex-direction:column;padding:0;overflow:hidden}.main-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}h2{font-size:16px;margin:0}.muted{color:var(--muted);font-size:12px}.logout{color:var(--brand);font-weight:800;text-decoration:none}.row{display:grid;gap:6px;margin-bottom:8px}input,select,textarea,button{font:inherit}input,select,textarea{width:100%;border:1px solid #c8d5dc;border-radius:6px;padding:8px;background:#fff}button{min-height:36px;border:0;border-radius:6px;background:var(--brand);color:#fff;font-weight:800;padding:8px 12px;cursor:pointer}button.secondary{background:#e7eef2;color:var(--text)}button.active{background:var(--danger);color:#fff}button:disabled{cursor:not-allowed;opacity:.55}.history-select{margin-top:8px;min-height:38px}.history{overflow:auto;padding:8px;display:flex;flex-direction:column;gap:6px}.history-item{border:1px solid transparent;background:transparent;color:var(--text);text-align:left;font-weight:700;min-height:0;padding:9px;border-radius:6px}.history-item:hover,.history-item.active{background:var(--soft);border-color:#c5dde3}.history-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.history-meta{display:block;color:var(--muted);font-size:11px;font-weight:600;margin-top:3px}.chatlog{display:flex;flex-direction:column;gap:12px;flex:1;overflow:auto;padding:14px}.bubble{max-width:92%;border-radius:8px;padding:10px 12px;white-space:pre-wrap;line-height:1.55}.user{align-self:flex-end;background:#dff0f7}.assistant{align-self:flex-start;background:#f0f4f7}.runline{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}.runline button{min-height:28px;padding:5px 9px;font-size:12px}.voicebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line)}.voicebar label{display:flex;align-items:center;gap:6px}.voicebar input{width:auto}.composer{display:grid;grid-template-columns:1fr auto auto;gap:8px;padding:0 14px 14px}.composer textarea{resize:vertical;min-height:82px}.empty-history{padding:10px;color:var(--muted);font-size:12px}body{background:linear-gradient(180deg,#f7fcfd 0%,#edf7f9 46%,#f8fbfb 100%);color:#17242c}header{background:rgba(255,255,255,.88);border-bottom-color:#cfe0e6;box-shadow:0 8px 24px rgba(36,78,92,.08)}.bar{height:60px;padding:9px 16px}.brand-icon{width:40px;height:40px}.brand-title b{color:#17313a}.brand-title span,.muted{color:#647884}.logout{color:#087d9a}.wrap{gap:14px;padding:14px;height:calc(100vh - 60px)}.panel{border:1px solid #d5e5ea;border-radius:8px;box-shadow:0 12px 34px rgba(36,78,92,.09)}.side{background:linear-gradient(180deg,#ffffff 0%,#eef9fb 100%)}.side-top{border-bottom:1px solid #d6e8ed}.side h2{color:#17313a}.main{background:#ffffff;color:#18252d}.main-head{min-height:52px;background:#ffffff;border-bottom:1px solid #dce9ee}.row label{letter-spacing:.02em;text-transform:uppercase}input,select,textarea{border-color:#c7d8df;background:#ffffff;color:#17242c}input:focus,select:focus,textarea:focus{outline:2px solid rgba(8,125,154,.16);border-color:#0b8aa6}button{background:#087d9a;box-shadow:0 3px 10px rgba(8,125,154,.16)}button:hover{filter:brightness(1.04)}button.secondary{background:#edf5f7;color:#17313a;box-shadow:none}button.danger{background:#b03a2e;color:#fff}.history{padding:9px}.history-item{color:#17313a;border-color:transparent}.history-item:hover,.history-item.active{background:#e5f5f7;border-color:#bfe0e8}.history-meta{color:#718691}.chatlog{background:linear-gradient(180deg,#ffffff 0%,#f1f8fa 100%)}.bubble{box-shadow:0 2px 8px rgba(36,78,92,.07)}.assistant{background:#ffffff;border:1px solid #dce9ee}.user{background:#dff4f7;border:1px solid #bfe4ec}.voicebar{background:#ffffff;border-top:1px solid #dce9ee}.composer{background:#ffffff}.memo-panel{background:#ffffff;border-top:1px solid #dce9ee;padding:0 14px 14px}.memo-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.memo-actions{display:flex;gap:8px;flex-wrap:wrap}.memo-actions button{min-height:30px;padding:6px 10px}.memo-panel textarea{min-height:96px;resize:vertical;background:#fbfeff}.ops{display:flex;flex-direction:column;gap:10px;padding:12px;overflow:auto}.ops-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.ops-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}.metric{background:#f5fbfc;border:1px solid #d8e9ee;border-radius:8px;padding:9px;min-width:0}.metric b{display:block;font-size:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.metric.wide{grid-column:1/-1}.goal-card{border:1px solid #d8e9ee;border-radius:8px;background:#fff;padding:10px;display:grid;gap:8px}.goal-top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.pill{display:inline-flex;align-items:center;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:900;background:#edf5f7;color:#17313a;white-space:nowrap}.pill.running{background:#fff1c7;color:#6c4b00}.pill.cooldown{background:#e8f1ff;color:#264f88}.pill.complete_today{background:#ddf7e6;color:#176139}.pill.limit_today{background:#fff1c7;color:#6c4b00}.pill.hold{background:#ffe5e1;color:#8a2c1c}.progress{height:8px;background:#e8f0f3;border-radius:999px;overflow:hidden}.progress>span{display:block;height:100%;background:linear-gradient(90deg,#0b8aa6,#19a889);width:0}.goal-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.goal-kv{background:#f7fbfc;border:1px solid #e0edf1;border-radius:6px;padding:6px;min-width:0}.goal-kv span{display:block;color:var(--muted);font-size:10px}.goal-kv b{display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.goal-note{font-size:12px;color:#40545d;line-height:1.45}.goal-actions{display:flex;gap:6px;flex-wrap:wrap}.goal-actions button{min-height:28px;padding:5px 9px;font-size:12px}.event-list{display:grid;gap:5px;font-size:12px}.event-item{padding:7px;border-radius:6px;background:#f7fbfc;border:1px solid #e0edf1}@media(max-width:820px){body{overflow:auto}.bar{height:54px;padding:7px 10px;align-items:center;flex-direction:row}.brand{gap:7px;flex:1 1 auto}.brand-icon{width:34px;height:34px}.brand-title b{font-size:14px}.brand-title span{display:none}.account{max-width:42vw;font-size:11px}.wrap{display:flex;flex-direction:column;gap:8px;height:auto;min-height:calc(100dvh - 54px);padding:8px;overflow:visible}.side{flex:0 0 auto;max-height:none;overflow:visible}.side-top{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px;padding:8px}.side-top h2{display:none}.side-top .row{margin:0;gap:3px;align-content:start}.side-top .row:first-of-type{grid-column:1/-1}.side-top .row label{font-size:10px}.side-top>button{min-height:34px;padding:7px 8px}.history-select{grid-column:1/-1;margin:0;min-height:38px}.side-top>.muted{display:none}.history{display:none}.main{flex:0 0 auto;min-height:0;overflow:visible}.main-head{min-height:42px;padding:8px 10px}.chatlog{flex:none;min-height:52dvh;max-height:70dvh;overflow:auto;padding:10px}.voicebar{padding:8px 10px}.composer{grid-template-columns:1fr auto;gap:7px;padding:0 10px 10px}.composer textarea{grid-column:1/-1;min-height:70px}.composer button{min-height:34px}.memo-panel{padding:0 10px 10px}.memo-head{align-items:flex-start;flex-direction:column;gap:6px}.memo-panel textarea{min-height:76px}.ops{padding:10px}.ops-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.metric{padding:7px}.metric b{font-size:15px}.goal-top{align-items:flex-start}.goal-card{padding:9px}.goal-status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style></head><body><header><div class="bar"><div class="brand"><?php if ($KDECK_UI_ICON !== ''): ?><img class="brand-icon" src="<?=h($KDECK_UI_ICON)?>" alt=""><?php endif; ?><span class="brand-title"><b><?=h($KDECK_UI_TITLE)?></b><span><?=h($KDECK_UI_SUBTITLE)?></span></span></div><div class="muted account">@<?=h($session_user)?> · <a class="logout" href="<?=h($logout_url)?>">Logout</a></div></div></header>
 <div class="wrap"><aside class="panel side"><div class="side-top"><h2>Chat</h2>
 <div class="row"><label class="muted">Agent</label><select id="target-agent"><?php foreach ($agents as $agent): ?><option value="<?=h($agent['id'] ?? '')?>" data-role="<?=h($agent['role'] ?? '')?>" data-host="<?=h($agent['host'] ?? '')?>" data-configured="<?=!empty($agent['configured']) ? '1' : '0'?>"><?=h(($agent['label'] ?? $agent['id'] ?? 'agent') . ' / ' . ($agent['host'] ?? ''))?></option><?php endforeach; ?></select><span id="agent-role" class="muted"></span></div>
 <div class="row"><label class="muted">Local Folder</label><select id="local-cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div>
 <div class="row" id="agent-folder-row"><label class="muted">Agent Folder</label><select id="chat-cwd"><?php foreach ($roots as $r): ?><option value="<?=h($r)?>"><?=h($r)?></option><?php endforeach; ?></select></div>
-<div class="row"><label class="muted">Model</label><input id="chat-model" value="<?=h($codex_model)?>"></div>
-<div class="row" id="remote-llm-row"><label class="muted">Remote LLM</label><select id="remote-llm-backend"></select><input id="remote-model" placeholder="model / optional"></div>
+<div class="row" id="codex-model-row"><label class="muted">Codex Model</label><select id="chat-model"><?php foreach ($codex_models as $model): ?><option value="<?=h($model)?>"<?=$model === $codex_model ? ' selected' : ''?>><?=h($model)?></option><?php endforeach; ?></select></div>
+<div class="row" id="remote-llm-row"><label class="muted">LLM</label><select id="remote-llm-backend"></select><select id="remote-model" aria-label="Backend model"></select><span id="llm-note" class="muted"></span></div>
 <div class="row"><label class="muted">Execution</label><select id="execution-mode"><?php foreach ($execution_modes as $key => $mode): ?><option value="<?=h($key)?>" data-sandbox="<?=h($mode['sandbox'] ?? '')?>"<?=$key === $default_execution_mode ? ' selected' : ''?>><?=h(($mode['label'] ?? $key) . ' / ' . ($mode['sandbox'] ?? ''))?></option><?php endforeach; ?></select></div>
 	<button type="button" id="new-chat">New Chat</button>
 	<select id="history-select" class="history-select"><option value="">履歴を読み込み中...</option></select>
 	<div class="muted" style="margin-top:8px">履歴はサーバに保存されます。</div></div>
 <div id="history" class="history"><div class="empty-history">履歴を選択するとここに情報を表示します。</div></div>
 </aside>
-	<main class="panel main"><div class="main-head"><h2 id="chat-title">Conversation</h2><span class="muted" id="chat-state">ready</span></div><div id="chatlog" class="chatlog"><div class="bubble assistant">フォルダを選んで、下の入力欄からCodexに指示できます。コマンド実行も会話の中で依頼してください。</div></div>
+	<main class="panel main"><div class="main-head"><h2 id="chat-title">Conversation</h2><span class="muted" id="chat-state">ready</span></div><div id="chatlog" class="chatlog"><div class="bubble assistant">フォルダとLLMを選んで、CodexまたはClaude Codeに指示できます。AutoはCodexの利用制限・認証エラー時だけClaude Codeへ切り替えます。</div></div>
 	<div class="voicebar">
 	  <button type="button" id="voice-input" class="secondary">🎙 Speak</button>
 	  <button type="button" id="voice-stop" class="secondary">読み上げ停止</button>
 	  <label class="muted"><input type="checkbox" id="voice-output"> 返答を読み上げ</label>
 	  <span id="voice-status" class="muted"></span>
 	</div>
-	<form id="chat-form" class="composer"><textarea id="chat-input" rows="4" placeholder="Codexへ送る指示"></textarea><button type="submit">Send</button><button type="button" id="send-voice" class="secondary">音声送信</button></form>
+	<form id="chat-form" class="composer"><textarea id="chat-input" rows="4" placeholder="AI coding agentへ送る指示"></textarea><button type="submit">Send</button><button type="button" id="send-voice" class="secondary">音声送信</button></form>
 	<section class="memo-panel">
 	  <div class="memo-head"><span class="muted">Voice Memo</span><div class="memo-actions"><button type="button" id="memo-copy" class="secondary">送信欄へコピー</button><button type="button" id="memo-clear" class="secondary">クリア</button></div></div>
 	  <textarea id="voice-memo" rows="5" placeholder="音声入力の下書きや長文プロンプトをここに残せます。内容はこのブラウザに保存されます。"></textarea>
@@ -265,6 +271,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		let historyThreads = [];
 		const localRoots = <?=json_encode(array_values($roots), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)?>;
 		const agents = <?=json_encode(array_values($agents), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)?>;
+		const backendLabels = <?=json_encode($backend_labels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)?>;
 		const agentMap = Object.fromEntries(agents.map(agent => [agent.id || '', agent]));
 		const chatlog = document.getElementById('chatlog');
 		const historyList = document.getElementById('history');
@@ -276,9 +283,11 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		const agentFolderRow = document.getElementById('agent-folder-row');
 		const folderSelect = document.getElementById('chat-cwd');
 		const modelInput = document.getElementById('chat-model');
+		const codexModelRow = document.getElementById('codex-model-row');
 		const remoteLlmRow = document.getElementById('remote-llm-row');
 		const remoteLlmBackendSelect = document.getElementById('remote-llm-backend');
 		const remoteModelInput = document.getElementById('remote-model');
+		const llmNote = document.getElementById('llm-note');
 		const executionModeSelect = document.getElementById('execution-mode');
 		const historySelect = document.getElementById('history-select');
 		const chatInput = document.getElementById('chat-input');
@@ -318,11 +327,8 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	if(savedLocalFolder && [...localFolderSelect.options].some(option => option.value === savedLocalFolder)){
 	  localFolderSelect.value = savedLocalFolder;
 	}
-	if(savedModel){
+	if(savedModel && [...modelInput.options].some(option => option.value === savedModel)){
 	  modelInput.value = savedModel;
-	}
-	if(savedRemoteModel){
-	  remoteModelInput.value = savedRemoteModel;
 	}
 	if(savedTargetAgent && [...targetAgentSelect.options].some(option => option.value === savedTargetAgent)){
 	  targetAgentSelect.value = savedTargetAgent;
@@ -354,10 +360,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	modelInput.addEventListener('change', () => localStorage.setItem('kdeck.model', modelInput.value));
 	remoteLlmBackendSelect.addEventListener('change', () => {
 	  localStorage.setItem('kdeck.remoteLlmBackend', remoteLlmBackendSelect.value);
-	  const agent = agentMap[targetAgentSelect.value || 'local'] || {};
-	  const defaults = agent.backend_default_models || {};
-	  remoteModelInput.value = defaults[remoteLlmBackendSelect.value] || agent.default_model || modelInput.value || '';
-	  localStorage.setItem('kdeck.remoteModel', remoteModelInput.value);
+	  populateRemoteLlm(remoteLlmBackendSelect.value, false);
 	});
 	remoteModelInput.addEventListener('change', () => localStorage.setItem('kdeck.remoteModel', remoteModelInput.value));
 		targetAgentSelect.addEventListener('change', () => {
@@ -437,10 +440,9 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  agentFolderRow.style.display = targetAgent === 'local' ? 'none' : '';
 	  localStorage.setItem('kdeck.folder.' + targetAgent, folderSelect.value);
 	}
-	function populateRemoteLlm(preferred = ''){
+	function populateRemoteLlm(preferred = '', restoreSavedModel = true){
 	  const targetAgent = targetAgentSelect.value || 'local';
 	  const agent = agentMap[targetAgent] || {};
-	  const isRemote = targetAgent !== 'local';
 	  const backends = Array.isArray(agent.llm_backends) && agent.llm_backends.length ? agent.llm_backends : ['codex-cli'];
 	  const selected = preferred && backends.includes(preferred)
 	    ? preferred
@@ -449,19 +451,33 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  backends.forEach(backend => {
 	    const option = document.createElement('option');
 	    option.value = backend;
-	    option.textContent = backend;
+	    option.textContent = backendLabels[backend] || backend;
 	    remoteLlmBackendSelect.appendChild(option);
 	  });
 	  remoteLlmBackendSelect.value = selected;
 	  const defaults = agent.backend_default_models || {};
-	  const savedModel = localStorage.getItem('kdeck.remoteModel') || '';
-	  const defaultModel = defaults[selected] || agent.default_model || modelInput.value || '';
-	  if(!isRemote){
-	    remoteModelInput.value = '';
-	  } else if(!remoteModelInput.value || !savedModel || preferred !== selected) {
-	    remoteModelInput.value = defaultModel;
-	  }
-	  remoteLlmRow.style.display = isRemote ? '' : 'none';
+	  const backendModels = agent.backend_models || {};
+	  const models = Array.isArray(backendModels[selected]) && backendModels[selected].length
+	    ? backendModels[selected]
+	    : [defaults[selected] || agent.default_model || modelInput.value || 'default'];
+	  const savedBackendModel = restoreSavedModel ? (localStorage.getItem('kdeck.remoteModel') || '') : '';
+	  const defaultModel = defaults[selected] || models[0];
+	  const selectedModel = savedBackendModel && models.includes(savedBackendModel) ? savedBackendModel : defaultModel;
+	  remoteModelInput.innerHTML = '';
+	  models.filter(Boolean).forEach(model => {
+	    const option = document.createElement('option');
+	    option.value = model;
+	    option.textContent = model;
+	    remoteModelInput.appendChild(option);
+	  });
+	  if(selectedModel && models.includes(selectedModel)) remoteModelInput.value = selectedModel;
+	  const usesCodexModel = selected === 'auto' || selected === 'codex-cli';
+	  codexModelRow.style.display = usesCodexModel ? '' : 'none';
+	  remoteModelInput.style.display = usesCodexModel ? 'none' : '';
+	  llmNote.textContent = selected === 'auto'
+	    ? 'Codexが利用制限・認証エラーのときだけ、OAuth認証済みClaude Codeへ自動切替'
+	    : (selected === 'claude-cli' ? 'Claude CodeのOAuthログインを使用' : '');
+	  localStorage.setItem('kdeck.remoteModel', remoteModelInput.value);
 	}
 	function updateAgentRole(){
 	  const selected = targetAgentSelect.selectedOptions[0];
@@ -562,10 +578,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 		  if(!(thread.messages || []).length) addBubble('assistant', '履歴は空です。');
 		  renderHistory();
 		  setChatState('loaded');
-		  if(window.matchMedia('(max-width: 820px)').matches){
-		    chatlog.scrollIntoView({block:'start', behavior:'smooth'});
-		  }
-			  }catch(e){
+		  }catch(e){
 			    setChatState('failed');
 			    chatlog.innerHTML = '';
 			    addBubble('assistant', '履歴を開けませんでした。画面を再読み込みしてもう一度試してください。');
@@ -681,7 +694,8 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	    `Folder: ${report.cwd || '-'}`,
 	    `Elapsed: ${Number(report.elapsed || 0)}秒`,
 	  ];
-	  if(report.remote_llm_backend) lines.push(`Remote LLM: ${report.remote_llm_backend} / ${report.remote_model || report.model || '-'}`);
+	  if(report.llm_backend || report.remote_llm_backend) lines.push(`LLM: ${report.llm_backend || report.remote_llm_backend} / ${report.model || report.remote_model || '-'}`);
+	  if(report.fallback_from) lines.push(`Fallback: ${report.fallback_from} → ${report.llm_backend || 'claude-cli'}`);
 	  if(report.error) lines.push(`Error: ${report.error}`);
 	  if(report.stderr_tail) lines.push(`\nSTDERR tail:\n${report.stderr_tail}`);
 	  if(report.log_tail) lines.push(`\nLog tail:\n${report.log_tail}`);
@@ -822,9 +836,7 @@ $agents = !empty($config['agents']) && is_array($config['agents'])
 	  const executionMode = executionModeSelect.value || 'chat-only';
 	  const sandbox = executionModeSelect.selectedOptions[0]?.dataset?.sandbox || '';
 	  const targetAgent = targetAgentSelect.value || 'local';
-	  const remoteLlmText = targetAgent === 'local'
-	    ? ''
-	    : `\nRemote LLM: ${remoteLlmBackendSelect.value || 'codex-cli'} / ${remoteModelInput.value || modelInput.value || ''}`;
+	  const remoteLlmText = `\nLLM: ${backendLabels[remoteLlmBackendSelect.value] || remoteLlmBackendSelect.value || 'codex-cli'} / ${remoteLlmBackendSelect.value === 'claude-cli' ? remoteModelInput.value : modelInput.value}`;
 	  if(executionMode === 'confirm'){
 	    const ok = window.confirm(`この指示を実行しますか？\n\nAgent: ${targetAgent}\nMode: 確認して実行\nSandbox: ${sandbox || 'workspace-write'}\nLocal Folder: ${localFolderSelect.value}\nAgent Folder: ${folderSelect.value}${remoteLlmText}`);
 	    if(!ok) return;

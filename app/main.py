@@ -57,7 +57,26 @@ APP_NAME = os.environ.get("KDECK_APP_NAME", str(APP_CONFIG.get("app_name") or "k
 SESSION_PREFIX = "kdeck-"
 TOKEN = os.environ.get("KDECK_TOKEN", "")
 CODEX_CMD = os.environ.get("KDECK_CODEX_CMD", "codex")
-CODEX_MODEL = os.environ.get("KDECK_CODEX_MODEL", "gpt-5.5")
+CODEX_MODEL = os.environ.get("KDECK_CODEX_MODEL", "gpt-5.6-sol")
+CODEX_MODELS = [
+    item.strip()
+    for item in os.environ.get(
+        "KDECK_CODEX_MODELS",
+        "gpt-5.6-sol,gpt-5.6-terra,gpt-5.6-luna",
+    ).split(",")
+    if item.strip()
+]
+if CODEX_MODEL not in CODEX_MODELS:
+    CODEX_MODELS.insert(0, CODEX_MODEL)
+CLAUDE_CMD = os.environ.get("KDECK_CLAUDE_CMD", str(Path.home() / ".local" / "bin" / "claude"))
+CLAUDE_MODEL = os.environ.get("KDECK_CLAUDE_MODEL", "sonnet")
+CLAUDE_MODELS = [
+    item.strip()
+    for item in os.environ.get("KDECK_CLAUDE_MODELS", "sonnet,opus,fable").split(",")
+    if item.strip()
+]
+if CLAUDE_MODEL not in CLAUDE_MODELS:
+    CLAUDE_MODELS.insert(0, CLAUDE_MODEL)
 CODEX_SANDBOX = os.environ.get("KDECK_CODEX_SANDBOX", "workspace-write")
 SWARMCLAW_BASE_URL = os.environ.get("SWARMCLAW_BASE_URL", "http://127.0.0.1:3456").rstrip("/")
 SWARMCLAW_HOME = os.environ.get("SWARMCLAW_HOME", str(Path.home() / ".swarmclaw"))
@@ -73,6 +92,7 @@ REMOTE_CODEX_CANDIDATES = [
     "codex",
 ]
 REMOTE_CLAUDE_CANDIDATES = [
+    "~/.claude/local/claude",
     "/usr/bin/claude",
     "/usr/local/bin/claude",
     "~/.local/bin/claude",
@@ -86,8 +106,25 @@ REMOTE_OLLAMA_CANDIDATES = [
 ]
 REMOTE_BACKEND_DEFAULT_MODELS = {
     "codex-cli": CODEX_MODEL,
-    "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "claude-sonnet-4-6"),
+    "claude-cli": os.environ.get("KDECK_REMOTE_CLAUDE_MODEL", "sonnet"),
     "ollama": os.environ.get("KDECK_REMOTE_OLLAMA_MODEL", "gemma4:12b-it-qat"),
+}
+LOCAL_LLM_BACKENDS = ["auto", "codex-cli", "claude-cli"]
+BACKEND_LABELS = {
+    "auto": "Auto (Codex → Claude)",
+    "codex-cli": "Codex CLI",
+    "claude-cli": "Claude Code",
+    "ollama": "Ollama",
+}
+LOCAL_BACKEND_DEFAULT_MODELS = {
+    "auto": CODEX_MODEL,
+    "codex-cli": CODEX_MODEL,
+    "claude-cli": CLAUDE_MODEL,
+}
+LOCAL_BACKEND_MODELS = {
+    "auto": CODEX_MODELS,
+    "codex-cli": CODEX_MODELS,
+    "claude-cli": CLAUDE_MODELS,
 }
 CODEX_EXECUTION_MODES = {
     "chat-only": {
@@ -126,6 +163,15 @@ REMOTE_PROJECT_NAMES = [str(name).strip() for name in APP_CONFIG.get("project_na
 _default_roots = APP_CONFIG.get("allowed_roots") if isinstance(APP_CONFIG.get("allowed_roots"), list) else []
 _allowed_roots_raw = os.environ.get("KDECK_ALLOWED_ROOTS", ",".join(str(p) for p in _default_roots)).strip()
 ALLOWED_ROOTS = [Path(p).expanduser().resolve() for p in _allowed_roots_raw.split(",") if p.strip()]
+DISCOVER_PROJECTS = os.environ.get("KDECK_DISCOVER_PROJECTS", "1").strip().lower() not in {"0", "false", "no", "off"}
+PROJECTS_BASE = Path(os.environ.get("KDECK_PROJECTS_BASE", "/home/kojima/work")).expanduser().resolve()
+if DISCOVER_PROJECTS and PROJECTS_BASE.is_dir():
+    discovered = sorted(
+        (path.resolve() for path in PROJECTS_BASE.iterdir() if path.is_dir() and not path.name.startswith(".") and (path / ".git").exists()),
+        key=lambda path: path.name.lower(),
+    )
+    seen_roots = {str(path) for path in ALLOWED_ROOTS}
+    ALLOWED_ROOTS.extend(path for path in discovered if str(path) not in seen_roots)
 if not ALLOWED_ROOTS:
     ALLOWED_ROOTS = [ROOT.resolve()]
 DEFAULT_CWD = os.environ.get("KDECK_DEFAULT_CWD", str(APP_CONFIG.get("default_cwd") or ALLOWED_ROOTS[0]))
@@ -270,17 +316,18 @@ DEFAULT_AGENTS: list[dict[str, Any]] = [
     {
         "id": "local",
         "label": "local",
-        "role": "local Codex",
+        "role": "local Codex / Claude Code",
         "host": "localhost",
         "kind": "local",
         "gateway_id": "",
         "allowed_roots": [str(path) for path in ALLOWED_ROOTS],
         "folder_base": str(ROOT),
         "project_folders": [str(path) for path in ALLOWED_ROOTS],
-        "llm_backends": ["codex-cli"],
-        "default_llm_backend": "codex-cli",
+        "llm_backends": LOCAL_LLM_BACKENDS,
+        "default_llm_backend": "auto",
         "default_model": CODEX_MODEL,
-        "backend_default_models": {"codex-cli": CODEX_MODEL},
+        "backend_default_models": LOCAL_BACKEND_DEFAULT_MODELS,
+        "backend_models": LOCAL_BACKEND_MODELS,
     },
 ]
 
@@ -305,7 +352,7 @@ def load_agents() -> list[dict[str, Any]]:
         agent_id = str(item.get("id") or "").strip()
         if not agent_id:
             continue
-        agents.append({
+        agent = {
             "id": agent_id,
             "label": str(item.get("label") or agent_id),
             "role": str(item.get("role") or ""),
@@ -326,12 +373,26 @@ def load_agents() -> list[dict[str, Any]]:
             "default_llm_backend": str(item.get("default_llm_backend") or "codex-cli"),
             "default_model": str(item.get("default_model") or CODEX_MODEL),
             "backend_default_models": item.get("backend_default_models") if isinstance(item.get("backend_default_models"), dict) else {**REMOTE_BACKEND_DEFAULT_MODELS, "codex-cli": CODEX_MODEL},
+            "backend_models": item.get("backend_models") if isinstance(item.get("backend_models"), dict) else {},
             "allowed_roots": [
                 str(p).strip()
                 for p in item.get("allowed_roots", [])
                 if str(p).strip()
             ] if isinstance(item.get("allowed_roots"), list) else [],
-        })
+        }
+        if agent["kind"] == "local":
+            agent.update({
+                "role": "kdeck local Codex / Claude Code",
+                "folder_base": str(PROJECTS_BASE),
+                "project_folders": [str(path) for path in ALLOWED_ROOTS],
+                "allowed_roots": [str(path) for path in ALLOWED_ROOTS],
+                "llm_backends": LOCAL_LLM_BACKENDS,
+                "default_llm_backend": "auto",
+                "default_model": CODEX_MODEL,
+                "backend_default_models": LOCAL_BACKEND_DEFAULT_MODELS,
+                "backend_models": LOCAL_BACKEND_MODELS,
+            })
+        agents.append(agent)
     return agents or DEFAULT_AGENTS
 
 
@@ -446,6 +507,7 @@ def agent_public(agent: dict[str, Any]) -> dict[str, Any]:
         "default_llm_backend": agent.get("default_llm_backend") or "codex-cli",
         "default_model": agent.get("default_model") or CODEX_MODEL,
         "backend_default_models": agent.get("backend_default_models") or {},
+        "backend_models": agent.get("backend_models") or {},
         "configured": bool(kind == "local" or (gateway_id and gateway_id in swarmclaw_gateway_ids())),
     }
 
@@ -869,6 +931,11 @@ def config() -> dict[str, Any]:
         "allowed_roots": [str(p) for p in ALLOWED_ROOTS],
         "codex_cmd": CODEX_CMD,
         "codex_model": CODEX_MODEL,
+        "codex_models": CODEX_MODELS,
+        "claude_cmd": CLAUDE_CMD,
+        "claude_model": CLAUDE_MODEL,
+        "claude_models": CLAUDE_MODELS,
+        "backend_labels": BACKEND_LABELS,
         "codex_sandbox": CODEX_SANDBOX,
         "execution_modes": CODEX_EXECUTION_MODES,
         "default_execution_mode": DEFAULT_EXECUTION_MODE,
@@ -1009,6 +1076,129 @@ def run_codex_exec(cwd: Path, model: str, prompt: str, job_id: str = "", executi
         "execution_mode": execution_mode,
         "sandbox": sandbox,
     }
+
+
+def run_claude_exec(cwd: Path, model: str, prompt: str, job_id: str = "", execution_mode: str = DEFAULT_EXECUTION_MODE) -> dict[str, Any]:
+    execution_mode = normalize_execution_mode(execution_mode)
+    permission_mode = {
+        "chat-only": "plan",
+        "research": "plan",
+        "confirm": "acceptEdits",
+        "full-access": "bypassPermissions",
+    }[execution_mode]
+    cmd = [
+        CLAUDE_CMD,
+        "-p",
+        "--model",
+        model or CLAUDE_MODEL,
+        "--output-format",
+        "text",
+        "--no-session-persistence",
+        "--permission-mode",
+        permission_mode,
+    ]
+    if execution_mode == "full-access":
+        cmd.append("--dangerously-skip-permissions")
+    proc = subprocess.Popen(
+        cmd,
+        text=True,
+        cwd=str(cwd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE,
+        start_new_session=True,
+    )
+    if job_id:
+        CHAT_PROCESSES[job_id] = proc
+        append_agent_task_log(job_id, "Claude Code process started", details={"pid": proc.pid, "model": model or CLAUDE_MODEL, "permission_mode": permission_mode})
+    try:
+        stdout, stderr = proc.communicate(input=prompt, timeout=CODEX_EXEC_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        stdout, stderr = proc.communicate()
+        return {
+            "returncode": 124,
+            "text": f"Claude Code timed out after {CODEX_EXEC_TIMEOUT} seconds.",
+            "stderr_tail": (stderr or "")[-4000:],
+            "events": [],
+            "execution_mode": execution_mode,
+            "sandbox": permission_mode,
+        }
+    finally:
+        if job_id:
+            CHAT_PROCESSES.pop(job_id, None)
+    text = (stdout or "").strip()
+    if proc.returncode != 0 and not text:
+        text = (stderr or f"claude exited with {proc.returncode}").strip()
+    if job_id:
+        append_agent_task_log(job_id, "Claude Code process finished", details={"returncode": proc.returncode, "stderr_tail": (stderr or "")[-1200:]})
+    return {
+        "returncode": proc.returncode,
+        "text": text,
+        "stderr_tail": (stderr or "")[-4000:],
+        "events": [],
+        "execution_mode": execution_mode,
+        "sandbox": permission_mode,
+        "llm_backend": "claude-cli",
+        "model": model or CLAUDE_MODEL,
+    }
+
+
+CODEX_FALLBACK_PATTERNS = (
+    "usage limit",
+    "rate limit",
+    "rate_limit",
+    "quota",
+    "too many requests",
+    "token expired",
+    "authentication required",
+    "not logged in",
+    "unauthorized",
+    "http 401",
+    "http 429",
+    "model is not available",
+    "model is not supported",
+    "not supported when using codex",
+    "model_not_found",
+)
+
+
+def codex_needs_claude_fallback(result: dict[str, Any]) -> bool:
+    if int(result.get("returncode") or 0) == 0:
+        return False
+    error_text = "\n".join((str(result.get("text") or ""), str(result.get("stderr_tail") or ""))).lower()
+    return any(pattern in error_text for pattern in CODEX_FALLBACK_PATTERNS)
+
+
+def run_local_llm(cwd: Path, backend: str, model: str, prompt: str, job_id: str, execution_mode: str) -> dict[str, Any]:
+    backend = backend if backend in LOCAL_LLM_BACKENDS else "auto"
+    if backend == "claude-cli":
+        return run_claude_exec(cwd, model or CLAUDE_MODEL, prompt, job_id, execution_mode)
+    try:
+        result = run_codex_exec(cwd, model or CODEX_MODEL, prompt, job_id, execution_mode)
+    except FileNotFoundError as exc:
+        result = {"returncode": 127, "text": str(exc), "stderr_tail": str(exc), "events": []}
+        if backend != "auto":
+            return result
+        append_agent_task_log(job_id, "Codex executable not found; falling back to Claude Code", "warning", {"error": str(exc), "claude_model": CLAUDE_MODEL})
+        fallback = run_claude_exec(cwd, CLAUDE_MODEL, prompt, job_id, execution_mode)
+        fallback["fallback_from"] = "codex-cli"
+        return fallback
+    result["llm_backend"] = "codex-cli"
+    result["model"] = model or CODEX_MODEL
+    if backend != "auto" or not codex_needs_claude_fallback(result):
+        return result
+    append_agent_task_log(job_id, "Codex unavailable; falling back to Claude Code", "warning", {
+        "codex_returncode": result.get("returncode"),
+        "codex_error_tail": str(result.get("stderr_tail") or result.get("text") or "")[-1200:],
+        "claude_model": CLAUDE_MODEL,
+    })
+    fallback = run_claude_exec(cwd, CLAUDE_MODEL, prompt, job_id, execution_mode)
+    fallback["fallback_from"] = "codex-cli"
+    return fallback
 
 
 def remote_backend_model(backend: str, requested: str, agent: dict[str, Any]) -> str:
@@ -1297,7 +1487,14 @@ def run_remote_codex(agent: dict[str, Any], cwd: str, model: str, prompt: str, j
 
 
 def run_remote_claude(agent: dict[str, Any], cwd: str, model: str, prompt: str, job_id: str, execution_mode: str) -> dict[str, Any]:
-    permission_mode = "bypassPermissions" if normalize_execution_mode(execution_mode) == "full-access" else "default"
+    normalized_mode = normalize_execution_mode(execution_mode)
+    permission_mode = {
+        "chat-only": "plan",
+        "research": "plan",
+        "confirm": "acceptEdits",
+        "full-access": "bypassPermissions",
+    }[normalized_mode]
+    bypass_flag = " --dangerously-skip-permissions" if normalized_mode == "full-access" else ""
     remote_script = (
         "set -e; "
         f"bin=$({remote_executable_probe(REMOTE_CLAUDE_CANDIDATES)}); "
@@ -1307,7 +1504,7 @@ def run_remote_claude(agent: dict[str, Any], cwd: str, model: str, prompt: str, 
         f"--model {shlex.quote(model)} "
         "--output-format text "
         "--tools '' "
-        f"--permission-mode {shlex.quote(permission_mode)}"
+        f"--permission-mode {shlex.quote(permission_mode)}{bypass_flag}"
     )
     returncode, stdout, stderr = run_remote_ssh_command(agent, remote_script, "", 900, job_id)
     text = clean_claude_text(stdout.strip()) or stderr.strip()
@@ -1463,7 +1660,7 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         f"Agent host: {agent.get('host') or 'local'}\n\n"
     )
     prompt = (
-        f"You are Codex in {APP_NAME}. Answer in Japanese unless the user asks otherwise.\n"
+        f"You are an AI coding agent in {APP_NAME}. Answer in Japanese unless the user asks otherwise.\n"
         "Continue the conversation below and act on the selected workspace when needed.\n"
         "The conversation block is persisted chat history from this deck. Use it as context when answering.\n\n"
         + execution_mode_instruction(execution_mode)
@@ -1484,8 +1681,10 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         history.append({"role": "assistant", "content": ack_message})
     save_thread(thread_id, str(cwd), model, target_agent, local_cwd, remote_llm_backend, remote_model)
     if agent.get("kind") == "local":
-        append_agent_task_log(job_id, "dispatching local Codex CLI", details={"cwd": str(cwd), "model": model, "sandbox": sandbox})
-        result = run_codex_exec(cwd, model, prompt, job_id, execution_mode)
+        local_backend = remote_llm_backend if remote_llm_backend in LOCAL_LLM_BACKENDS else "auto"
+        local_model = (remote_model or CLAUDE_MODEL) if local_backend == "claude-cli" else model
+        append_agent_task_log(job_id, "dispatching local LLM", details={"cwd": str(cwd), "llm_backend": local_backend, "model": local_model, "sandbox": sandbox})
+        result = run_local_llm(cwd, local_backend, local_model, prompt, job_id, execution_mode)
     else:
         append_agent_task_log(job_id, "dispatching remote agent", details={
             "target_agent": target_agent,
@@ -1516,7 +1715,9 @@ def run_chat_turn(cwd: Path, model: str, thread_id: str, user_prompt: str, job_i
         "process_ok": result["returncode"] == 0,
         "business_status": business_status,
         "thread_id": thread_id,
-        "model": model,
+        "model": result.get("model") or model,
+        "llm_backend": result.get("llm_backend") or remote_llm_backend or "codex-cli",
+        "fallback_from": result.get("fallback_from") or "",
         "remote_llm_backend": remote_llm_backend,
         "remote_model": remote_model,
         "execution_mode": execution_mode,

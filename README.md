@@ -37,6 +37,13 @@ The local PTY session feature stores active sessions in API process memory, so a
 Chat threads are saved under `KDECK_DATA_DIR` so the web UI and later Codex turns can reopen and reference recent conversations.
 The multi-server PoC adds a `target_agent` selector so kdeck can keep task history for the local Codex runtime and SwarmClaw-managed OpenClaw runtimes.
 
+The local agent offers `Auto`, `Codex CLI`, and `Claude Code`. `Auto` starts with
+Codex and switches to the OAuth-authenticated Claude Code CLI only for
+authentication, usage-limit, rate-limit, or model-availability errors. Local
+project folders are discovered from Git repositories directly under
+`KDECK_PROJECTS_BASE`, so the mobile folder selector does not depend on a stale
+hard-coded list.
+
 See [Kurage Agent Deck の技術解説](docs/kurage-agent-deck-technical-overview.md) for a Japanese technical overview.
 See [kdeck Multi-Server Agent Plan](docs/multi-server-agent-plan.md) for the 192.168.0.3 / .2 / .14 / .11 agent layout.
 
@@ -83,8 +90,8 @@ Examples:
 
 The remote LLM selector maps to OpenClaw model names:
 
-- `codex-cli` means OpenClaw model `openai/gpt-5.5` through the Codex app-server harness.
-- `claude-cli` means OpenClaw model `claude-cli/claude-sonnet-4-6`.
+- `codex-cli` means OpenClaw model `openai/gpt-5.6-sol` through the Codex app-server harness.
+- `claude-cli` uses the authenticated Claude Code CLI; the `sonnet` alias follows Claude Code's current Sonnet model.
 - Remote agent execution must report `control_plane: openclaw`.
 
 SSH is only used for setup and maintenance. kdeck must not treat direct SSH
@@ -150,8 +157,8 @@ Remote servers:
   - Available backends: codex-cli and claude-cli.
 
 LLM/backend mapping:
-- codex-cli maps to OpenClaw model openai/gpt-5.5 through the Codex app-server harness.
-- claude-cli maps to OpenClaw model claude-cli/claude-sonnet-4-6.
+- codex-cli maps to OpenClaw model openai/gpt-5.6-sol through the Codex app-server harness.
+- claude-cli maps to the authenticated Claude Code CLI with the current `sonnet` alias.
 
 Show these flows:
 - Smartphone -> kdeck.php -> kdeck FastAPI -> OpenClaw gateway .2 -> Codex/Claude.
