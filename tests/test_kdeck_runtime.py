@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -33,3 +34,17 @@ def test_controller_database_initialization_is_concurrent_safe(tmp_path: Path, m
     with controller.connect() as conn:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
         assert conn.execute("SELECT COUNT(*) FROM goals").fetchone()[0] == 0
+
+
+def test_controller_status_uses_last_snapshot_when_database_is_busy(monkeypatch) -> None:
+    monkeypatch.setattr(controller, "init_db", lambda: None)
+    monkeypatch.setattr(controller, "cached_external_status", lambda: ({"ok": True}, {"ok": True}))
+    monkeypatch.setattr(controller, "_database_status", lambda: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked")))
+    monkeypatch.setattr(controller, "_DATABASE_STATUS_CACHE", {"day": "2026-08-01", "goals": [{"id": 1, "status": "waiting"}], "events": []})
+    monkeypatch.setattr(controller, "build_status_summary", lambda goals, rq: {"waiting": len(goals)})
+
+    result = controller.status()
+
+    assert result["ok"] is True
+    assert result["database_stale"] is True
+    assert result["goals"] == [{"id": 1, "status": "waiting"}]

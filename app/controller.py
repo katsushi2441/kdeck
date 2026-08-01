@@ -43,6 +43,7 @@ _EXTERNAL_STATUS_CACHE: dict[str, Any] = {
     "rqdb4ai": {"ok": False, "refreshing": True},
     "worker_status": {"ok": False, "refreshing": True},
 }
+_DATABASE_STATUS_CACHE: dict[str, Any] = {"day": "", "goals": [], "events": []}
 KGROWTH_EXECUTABLE_KINDS = {
     item.strip()
     for item in os.environ.get(
@@ -98,11 +99,12 @@ def today_key() -> str:
     return dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date().isoformat()
 
 
-def connect() -> sqlite3.Connection:
+def connect(timeout_ms: int | None = None) -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=max(1, SQLITE_BUSY_TIMEOUT_MS // 1000))
+    busy_timeout_ms = SQLITE_BUSY_TIMEOUT_MS if timeout_ms is None else max(1, timeout_ms)
+    conn = sqlite3.connect(DB_PATH, timeout=max(0.1, busy_timeout_ms / 1000))
     conn.row_factory = sqlite3.Row
-    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+    conn.execute(f"PRAGMA busy_timeout={busy_timeout_ms}")
     return conn
 
 
@@ -1300,7 +1302,15 @@ def status() -> dict[str, Any]:
     init_db()
     rq_summary, workers = cached_external_status()
     with _STATUS_LOCK:
-        day, goals, events = _database_status()
+        database_stale = False
+        try:
+            day, goals, events = _database_status()
+            _DATABASE_STATUS_CACHE.update({"day": day, "goals": goals, "events": events})
+        except sqlite3.OperationalError:
+            database_stale = True
+            day = str(_DATABASE_STATUS_CACHE.get("day") or today_key())
+            goals = list(_DATABASE_STATUS_CACHE.get("goals") or [])
+            events = list(_DATABASE_STATUS_CACHE.get("events") or [])
     return {
         "ok": True,
         "enabled": CONTROLLER_ENABLED,
@@ -1311,6 +1321,7 @@ def status() -> dict[str, Any]:
         "events": events,
         "rqdb4ai": rq_summary,
         "worker_status": workers,
+        "database_stale": database_stale,
     }
 
 
@@ -1338,7 +1349,7 @@ def cached_external_status() -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def _database_status() -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
-    with connect() as conn:
+    with connect(timeout_ms=750) as conn:
         day = today_key()
         now = dt.datetime.now(dt.timezone.utc)
         totals_by_goal = {
