@@ -13,16 +13,30 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
+LOCAL_ENV = dotenv_values(ROOT / ".env")
 
 DATA_DIR = Path(os.environ.get("KDECK_DATA_DIR", ROOT / "storage")).expanduser()
 DB_PATH = Path(os.environ.get("KDECK_CONTROLLER_DB", DATA_DIR / "controller.sqlite")).expanduser()
-RQDB4AI_API_URL = os.environ.get("KDECK_RQDB4AI_API_URL", os.environ.get("RQDB4AI_API_URL", "http://127.0.0.1:18300")).rstrip("/")
-RQDB4AI_API_TOKEN = os.environ.get("KDECK_RQDB4AI_API_TOKEN", os.environ.get("RQDB4AI_API_TOKEN", "")).strip()
+# The goal runner is long-lived, but each controller command is a fresh Python
+# process. Prefer the current local file so credential rotations take effect
+# without restarting the runner that enqueues jobs into RQDB4AI.
+RQDB4AI_API_URL = str(
+    LOCAL_ENV.get("KDECK_RQDB4AI_API_URL")
+    or os.environ.get("KDECK_RQDB4AI_API_URL")
+    or os.environ.get("RQDB4AI_API_URL")
+    or "http://127.0.0.1:18300"
+).rstrip("/")
+RQDB4AI_API_TOKEN = str(
+    LOCAL_ENV.get("KDECK_RQDB4AI_API_TOKEN")
+    or os.environ.get("KDECK_RQDB4AI_API_TOKEN")
+    or os.environ.get("RQDB4AI_API_TOKEN")
+    or ""
+).strip()
 WORKER_STATUS_URL = os.environ.get("KDECK_WORKER_STATUS_URL", "")
 CONTROLLER_ENABLED = os.environ.get("KDECK_CONTROLLER_ENABLED", "1").strip().lower() not in {"0", "false", "no", "off"}
 DEFAULT_COOLDOWN_SECONDS = int(os.environ.get("KDECK_CONTROLLER_COOLDOWN_SECONDS", "900"))
