@@ -48,3 +48,18 @@ def test_controller_status_uses_last_snapshot_when_database_is_busy(monkeypatch)
     assert result["ok"] is True
     assert result["database_stale"] is True
     assert result["goals"] == [{"id": 1, "status": "waiting"}]
+
+
+def test_youtube_auth_failure_remains_identifiable_after_marking() -> None:
+    goal = {"goal_name": "kurage-shorts-youtube-upload"}
+    evaluation = {
+        "ok": False,
+        "status": "failed",
+        "items": 0,
+        "note": "invalid_grant: Token has been expired or revoked",
+    }
+
+    assert controller.is_manual_auth_required(goal, evaluation) is True
+    marked = controller.mark_auth_required(evaluation)
+    assert marked["status"] == "auth_required"
+    assert marked["items"] == 0

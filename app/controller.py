@@ -1233,7 +1233,8 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
             (json.dumps(detail, ensure_ascii=False), evaluation["note"], utc_now(), goal["id"]),
         )
         return False
-    if is_manual_auth_required(goal, evaluation):
+    manual_auth_required = is_manual_auth_required(goal, evaluation)
+    if manual_auth_required:
         evaluation = mark_auth_required(evaluation)
     now = utc_now()
     conn.execute(
@@ -1258,7 +1259,7 @@ def refresh_running_goal(conn: sqlite3.Connection, goal: dict[str, Any]) -> bool
         status = "completed"
         note = f"kgrowth improvement completed permanently: {evaluation['note'] or goal['goal_name']}"
         cooldown_until = ""
-    elif is_manual_auth_required(goal, evaluation):
+    elif manual_auth_required:
         status = "hold"
         note = "YouTube認証が失効しています。再認証が終わるまで自動リトライを停止します。"
         cooldown_until = ""
