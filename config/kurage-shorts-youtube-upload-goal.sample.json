@@ -7,7 +7,7 @@
   "resource": "kurage+youtube+shorts",
   "daily_target": 3,
   "per_run_target": 1,
-  "max_runs_per_day": 3,
+  "max_runs_per_day": 6,
   "cooldown_seconds": 28800,
   "priority": 85,
   "enabled": 1,
